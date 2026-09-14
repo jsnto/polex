@@ -1,0 +1,115 @@
+# AGENTS.md — PoleX
+
+Guidance for AI coding agents (and humans) working in this repository.
+
+## What this is
+
+PoleX is a home-lab server status + Wake-on-LAN system:
+
+- `backend/` — Go + Gin REST API. Holds a configurable list of servers,
+  health-checks them on an interval (TCP connect, or ICMP ping, per server),
+  and sends WOL magic packets on demand. All `/api` routes (except `/api/health` and
+  `/api/login`) require a bearer token from `POST /api/login`; the
+  username/password come from `backend/.env`. See `backend/AGENTS.md`.
+- `android/` — Android app (Kotlin, Jetpack Compose, Glance widget).
+  Dashboard with per-server **Wake** button, settings for backend URL and
+  server list, and a home-screen status widget. See `android/AGENTS.md`.
+- `scripts/` — helper scripts (bash): `start-backend.sh` (Docker or local
+  Go), `build-apk.sh` (Docker Compose or local gradle), `test-emulator.sh`
+  (smoke-test the APK on a Dockerized Android emulator).
+- `scripts/windows/` — PowerShell (5.1+) equivalents of the three scripts
+  for Windows + Docker Desktop: `start-backend.ps1`, `build-apk.ps1`
+  (`-Task debug|release`, `-Method docker|local`), `test-emulator.ps1`
+  (`-Build`, `-Keep`, `-ApkPath`).
+
+## Data flow
+
+``` Android app ──POST /api/login──▶ backend (issues bearer token; creds from backend/.env)
+     │                              │
+     │ GET /api/status              │ TCP/ping-checks servers every CHECK_INTERVAL
+     │ (all calls carry `Authorization: Bearer <token>`)
+     │ POST/PUT/DELETE /api/servers (configuration)
+     │ POST /api/servers/:id/wol    (wake action)
+     ▼
+backend ──UDP magic packet──▶ target server NIC
+```
+
+Everything under `/api` except `GET /api/health` and `POST /api/login`
+requires a bearer token. The app stores the token in Prefs after login and
+re-routes to the login screen on any 401.
+
+The app auto-refreshes status every 15 s; the widget's cache is refreshed
+in the background roughly every 15 minutes by a self-rescheduling inexact
+alarm (`WidgetAlarm` → `StatusWorker.enqueueNow`, because the system may
+defer the WorkManager periodic job) plus the 15-min WorkManager job, on
+every in-app status poll, and on the widget's system update tick
+(≥30 min, via `ServerWidgetProvider.onUpdate` → `StatusWorker.enqueueNow`).
+
+## Conventions
+
+- Keep the REST API contract stable; it is the shared boundary between the
+  two modules. If you change a field in the status payload, update:
+  `backend/main.go` (`StatusView`), `android/.../Model.kt` (`SrvStatus` +
+  `parseStatusArray`), and the README tables. Same for auth responses:
+  `backend/auth.go` (`/api/login` → `{ok, token}`, 401 →
+  `{ok:false,error:...}`) ↔ `android/.../LoginScreen.kt`.
+- Backend config is persisted in `backend/data.json` (plain run) or
+  `backend/data/data.json` (Docker run). Both are gitignored. Do not commit.
+  Login credentials come from `backend/.env` (gitignored; template in
+  `.env.example`) — never hardcode them or commit a real `.env`.
+- The backend runs plain HTTP on the LAN; token auth is the only intended
+  protection. Do not add TLS scaffolding unless asked.
+- No test suites exist yet. Verify backend changes with `go vet ./...` and a
+  live `curl` round-trip (see `backend/AGENTS.md` for the smoke test).
+- README files double as the API contract documentation — keep them in sync.
+
+## Convenience scripts (`scripts/`)
+
+```sh
+./scripts/start-backend.sh            # backend via Docker Compose; falls back
+                                      # to a local Go build if docker is unusable
+ADDR=":9000" CHECK_INTERVAL=5s ./scripts/start-backend.sh
+
+./scripts/build-apk.sh                # debug APK via android/docker-compose.yml
+                                      # (forces a fresh image: down -v + --no-cache,
+                                      #  verifies the in-image source fingerprint
+                                      #  before compiling — don't skip it)
+./scripts/build-apk.sh release        # release APK (signed with the debug key)
+./scripts/build-apk.sh local debug    # local gradle (needs JDK 17)
+
+./scripts/test-emulator.sh            # emulator smoke test (needs /dev/kvm)
+./scripts/test-emulator.sh --keep     # ...and leave it running for manual use
+
+# Windows equivalents (PowerShell, Docker Desktop):
+#   .\scripts\windows\start-backend.ps1
+#   .\scripts\windows\build-apk.ps1 -Task release
+#   .\scripts\windows\test-emulator.ps1 -Keep
+```
+
+APKs land in `android/apk/`.
+
+On Windows, the `scripts/windows/*.ps1` scripts mirror these; the emulator
+needs Docker Desktop's WSL2 backend (KVM), instead of a host `/dev/kvm`.
+
+`test-emulator.sh` uses `android/docker-compose.emulator.yml` (Google's official
+prebuilt emulator image, KVM-backed). It verifies: app window focused, no fatal
+logcat crashes, and writes a screenshot to `android/apk/`. It does NOT
+replace on-device testing of the Glance widget (widgets render differently in
+the emulator's launcher).
+
+## Quick orientation
+
+| Task                     | Start here                    |
+|--------------------------|-------------------------------|
+| Change health logic      | `backend/main.go: checkServer` (→ `checkHost` / `pingHost`) |
+| Change WOL behaviour     | `backend/wol.go`              |
+| Change API routes        | `backend/main.go: main()`     |
+| Change auth/login        | `backend/auth.go` + `env.go`  |
+| Change dashboard UI      | `android/.../MainScreen.kt`   |
+| Change server detail page| `android/.../ServerDetailScreen.kt` |
+| Change server reorder    | `backend/main.go: reorderServers` + `android/.../SettingsScreen.kt` (drag) |
+| Change settings UI       | `android/.../SettingsScreen.kt` |
+| Change login UI          | `android/.../LoginScreen.kt`  |
+| Change widget            | `android/.../ServerWidget.kt` |
+| Change networking        | `android/.../Api.kt`          |
+| Change shared config     | `android/.../Prefs.kt`        |

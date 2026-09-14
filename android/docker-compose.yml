@@ -1,0 +1,28 @@
+# Builds PoleX Android APKs inside a container (JDK 17 + Android SDK + Gradle).
+# No local Android SDK / Android Studio needed.
+#
+#   docker compose up --build apk          # debug APK
+#   TASKS="assembleRelease" docker compose up apk   # unsigned release APK
+#
+# APKs are copied to ./apk (polex-debug.apk / polex-release.apk).
+services:
+  apk:
+    build: .
+    image: polex-android-builder
+    environment:
+      # Space-separated Gradle tasks. Debug is the default.
+      # ${...} form so the host env var can override (e.g. TASKS=assembleRelease).
+      TASKS: ${TASKS:-assembleDebug}
+    # The daemon runs this via `sh -c`, so the chain is written flat and the
+    # folded scalar keeps it on a single line (no nested quoting, no `\;`).
+    command: >-
+      sh -c 'gradle --no-daemon --console=plain ${TASKS} &&
+      mkdir -p /out &&
+      find app/build/outputs/apk -name "*.apk" -exec cp {} /out/ \; &&
+      ls -lh /out'
+    volumes:
+      - ./apk:/out                  # APKs land here
+      - gradle-cache:/root/.gradle  # dependency cache survives rebuilds
+
+volumes:
+  gradle-cache:

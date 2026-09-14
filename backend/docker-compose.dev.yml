@@ -1,0 +1,20 @@
+# Development override for the PoleX backend.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Runs `go run .` against a LIVE bind mount of the source (the golang build
+# stage of Dockerfile), so a restart picks up code changes without rebuilding
+# the binary. Same host networking (WOL) and ./data volume as the standard
+# compose file. Use it while iterating on backend code; drop the -f flag
+# (or use scripts/start-backend.sh) for a normal run.
+services:
+  backend:
+    build:
+      context: .
+      target: build            # golang:1.22-alpine stage — has the go toolchain
+    image: polex-backend-dev
+    command: go run .
+    volumes:
+      - .:/src                 # live source (replaces COPY . .)
+      - ./data:/app/data
+    working_dir: /src

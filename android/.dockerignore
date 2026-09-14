@@ -1,0 +1,14 @@
+# Keep stale host state out of the build image. `COPY . .` in the Dockerfile
+# would otherwise bake these into /workspace, where the Kotlin incremental
+# compile cache (app/build/.transforms, app/build/tmp/kotlin-classes) can make
+# Gradle replay old `e:` errors even when the source changed.
+app/build/
+.gradle/
+build/
+
+# Generated artifacts — never needed in the build image.
+apk/
+
+# Machine-specific; the image sets ANDROID_HOME itself. A stale host
+# local.properties (pointing at a host-only SDK path) would override it.
+local.properties

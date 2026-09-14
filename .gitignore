@@ -1,0 +1,12 @@
+backend/polex-backend
+backend/data.json
+backend/data.json.tmp
+backend/data/
+!backend/data/README.txt
+backend/.env
+android/.gradle
+android/build
+android/app/build
+android/apk/
+*.iml
+.idea

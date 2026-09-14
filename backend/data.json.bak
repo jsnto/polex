@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "id": 1,
+      "name": "NAS",
+      "ip": "192.168.1.10",
+      "mac": "AA:BB:CC:DD:EE:01",
+      "port": 22
+    },
+    {
+      "id": 2,
+      "name": "Workstation",
+      "ip": "192.168.1.11",
+      "mac": "AA:BB:CC:DD:EE:02",
+      "port": 22
+    }
+  ],
+  "nextId": 3
+}

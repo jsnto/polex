@@ -1,0 +1,33 @@
+# Android emulator in Docker (Google's official prebuilt image, from the
+# google/android-emulator-container-scripts project).
+# Requires KVM (/dev/kvm) on the host (Docker Desktop's WSL2 backend
+# provides it when Windows virtualization is enabled).
+#
+#   docker compose -f android/docker-compose.emulator.yml up -d
+#   docker compose -f android/docker-compose.emulator.yml exec emulator /android/sdk/platform-tools/adb shell
+#   docker compose -f android/docker-compose.emulator.yml down
+#
+# The host's ./apk directory is mounted read-only at /apk inside the
+# container so the test script can install APKs from there.
+#
+# The image runs its own adb server (the emulator starts with
+# -skip-adb-auth), so talk to it via `docker compose exec ... adb`; no
+# ADBKEY or published ports are needed.
+#
+# Override the image if you prefer a different variant (the non
+# -no-metrics variant phones home; the 28-/29- variants target older APIs):
+#   EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64:30.1.2 \
+#     docker compose -f android/docker-compose.emulator.yml up -d
+#
+# Note: the previous default (a "reviewdog" image on ghcr.io) was wrong —
+# no such public image exists — and ghcr.io/gcr.io are unreachable from some
+# networks anyway. us-docker.pkg.dev (Google Artifact Registry) is public
+# and anonymous-pull.
+services:
+  emulator:
+    image: ${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:30.1.2}
+    container_name: polex-emulator
+    privileged: true
+    volumes:
+      - /dev/kvm:/dev/kvm
+      - ./apk:/apk:ro

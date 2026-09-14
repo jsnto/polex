@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">PoleX</string>
+    <string name="widget_description">At-a-glance server status</string>
+</resources>
