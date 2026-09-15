@@ -30,6 +30,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,23 +62,50 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     var wolBusy by remember { mutableStateOf(false) }
     var wakeConfirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    // Disconnected state (connection-level fetch failure, code -1): shows
+    // the same dedicated full-screen page as the dashboard; the
+    // session/token are left untouched.
+    val tracker = remember { RetryTracker() }
+    var disconnected by remember { mutableStateOf(false) }
+    var retryAttempts by remember { mutableIntStateOf(0) }
+    // True while a fetch cycle (auto-retries) is in flight.
+    var cycling by remember { mutableStateOf(false) }
 
     fun refresh() {
+        if (cycling) return
+        cycling = true
+        retryAttempts = 0
         scope.launch {
-            val result = Api.safe { Api.get("${Api.base(context)}/api/status") }
+            val result = runFetchCycle(
+                tracker,
+                onAttempt = { n ->
+                    disconnected = true
+                    retryAttempts = n
+                },
+            ) { Api.safe { Api.get("${Api.base(context)}/api/status") } }
+            cycling = false
             when {
                 result.code == 200 -> {
+                    tracker.reset()
+                    retryAttempts = 0
+                    disconnected = false
                     status = parseStatusArray(result.body).firstOrNull { it.id == serverId }
                     error = ""
                 }
-                result.code == 401 -> {
+                Disconnect.requiresReauth(result.code) -> {
+                    // Token rejected by a REACHABLE backend: back to login.
+                    disconnected = false
                     onAuthError()
                     return@launch
                 }
-                else -> error = if (result.code == -1) {
-                    "Cannot reach backend (${result.body})"
-                } else {
-                    "Server error ${result.code}: ${result.body}"
+                Disconnect.isDisconnected(result.code) -> {
+                    // Auto-retries exhausted; the disconnected page's Retry
+                    // button starts a new cycle.
+                }
+                else -> {
+                    // Reachable backend, other error: keep the inline bar.
+                    disconnected = false
+                    error = "Server error ${result.code}: ${result.body}"
                 }
             }
         }
@@ -95,10 +123,11 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
-    // Keep the status live while this page is open.
+    // Keep the status live while this page is open (paused while
+    // disconnected; recovery is via the Retry button instead).
     LaunchedEffect(Unit) {
         while (true) {
-            refresh()
+            if (!disconnected) refresh()
             delay(15_000)
         }
     }
@@ -141,6 +170,16 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
             )
         },
     ) { pad ->
+        if (disconnected) {
+            DisconnectedScreen(
+                attempts = retryAttempts,
+                retrying = cycling,
+                onRetry = { refresh() },
+                onBack = onBack,
+                modifier = Modifier.padding(pad),
+            )
+            return@Scaffold
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

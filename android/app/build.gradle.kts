@@ -70,4 +70,8 @@ dependencies {
 
     // Background refresh for the widget
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Unit tests (JVM, no device/emulator needed)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

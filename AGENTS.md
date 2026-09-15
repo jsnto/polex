@@ -53,14 +53,21 @@ every in-app status poll, and on the widget's system update tick
   `parseStatusArray`), and the README tables. Same for auth responses:
   `backend/auth.go` (`/api/login` → `{ok, token}`, 401 →
   `{ok:false,error:...}`) ↔ `android/.../LoginScreen.kt`.
+- The app stores the token in Prefs after login and re-routes to the login
+  screen on a genuine 401. A connection-level failure (backend unreachable,
+  `Api.Result.code == -1`) is "disconnected": the token/session are kept and
+  the app retries 3× at 2 s then offers a manual Retry page — policy lives in
+  `android/.../Disconnect.kt` (shared by dashboard and detail page).
 - Backend config is persisted in `backend/data.json` (plain run) or
   `backend/data/data.json` (Docker run). Both are gitignored. Do not commit.
   Login credentials come from `backend/.env` (gitignored; template in
   `.env.example`) — never hardcode them or commit a real `.env`.
 - The backend runs plain HTTP on the LAN; token auth is the only intended
   protection. Do not add TLS scaffolding unless asked.
-- No test suites exist yet. Verify backend changes with `go vet ./...` and a
-  live `curl` round-trip (see `backend/AGENTS.md` for the smoke test).
+- Backend: no test suite yet; verify changes with `go vet ./...` and a live
+  `curl` round-trip (see `backend/AGENTS.md` for the smoke test).
+- Android: JVM unit tests live in `android/app/src/test/` (no device needed);
+  run them with `gradle :app:testDebugUnitTest` alongside `:app:assembleDebug`.
 - README files double as the API contract documentation — keep them in sync.
 
 ## Convenience scripts (`scripts/`)
@@ -113,3 +120,11 @@ the emulator's launcher).
 | Change widget            | `android/.../ServerWidget.kt` |
 | Change networking        | `android/.../Api.kt`          |
 | Change shared config     | `android/.../Prefs.kt`        |
+| Change disconnected/retry| `android/.../Disconnect.kt` (RetryTracker, runFetchCycle, DisconnectedScreen) |
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

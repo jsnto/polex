@@ -36,6 +36,7 @@ import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,6 +64,14 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var wolBusy by remember { mutableStateOf(false) }
+    // Disconnected state (connection-level fetch failure, code -1): shows
+    // the dedicated full-screen page; the session/token are left untouched.
+    val tracker = remember { RetryTracker() }
+    var disconnected by remember { mutableStateOf(false) }
+    var retryAttempts by remember { mutableIntStateOf(0) }
+    // True while a fetch cycle (auto-retries) is in flight; guards against
+    // overlapping cycles from the 15 s loop, toolbar, pull-to-refresh.
+    var cycling by remember { mutableStateOf(false) }
     // Pull-to-refresh: the spinner flag (true only while a pull is in flight —
     // the 15 s auto-refresh and the toolbar button don't show it) plus the
     // gesture state required by pullToRefresh.
@@ -74,46 +83,72 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     suspend fun fetchStatus(): Api.Result =
         Api.safe { Api.get("${Api.base(context)}/api/status") }
 
-    // Applies one fetched status to the UI (and keeps the widget cache fresh).
-    suspend fun handleStatus(result: Api.Result) {
+    // One fetch + auto-retry cycle (3 retries, 2 s apart) on
+    // connection-level failure, then applies the final result to the UI.
+    // Connection failures never touch the token; only a real 401 re-auths.
+    suspend fun runRefresh() {
+        val result = runFetchCycle(
+            tracker,
+            onAttempt = { n ->
+                disconnected = true
+                retryAttempts = n
+            },
+        ) { fetchStatus() }
+        cycling = false
         when {
             result.code == 200 -> {
+                tracker.reset()
+                retryAttempts = 0
+                disconnected = false
                 items = parseStatusArray(result.body)
                 error = ""
                 // Keep the widget's cache fresh too.
                 Prefs.setCache(context, result.body)
                 ServerWidget.refreshAll(context)
             }
-            result.code == 401 -> {
-                // Token rejected/expired: back to the login screen.
+            Disconnect.requiresReauth(result.code) -> {
+                // Token rejected by a REACHABLE backend: back to login.
+                disconnected = false
                 onAuthError()
-                return
             }
-            result.code != -1 -> error = "Server error ${result.code}: ${result.body}"
-            else -> error = "Cannot reach backend (${result.body})"
+            Disconnect.isDisconnected(result.code) -> {
+                // Auto-retries exhausted; the disconnected page's Retry
+                // button (or the toolbar/pull-to-refresh) starts a new cycle.
+            }
+            else -> {
+                // Reachable backend, other error: keep the inline error bar.
+                disconnected = false
+                error = "Server error ${result.code}: ${result.body}"
+            }
         }
         loading = false
     }
 
     fun refresh() {
-        scope.launch { handleStatus(fetchStatus()) }
+        if (cycling) return
+        cycling = true
+        retryAttempts = 0
+        scope.launch { runRefresh() }
     }
 
     // Pull-to-refresh variant: shows the spinner while the (launched) fetch
-    // is in flight. pullToRefresh's onRefresh is a plain (non-suspend) lambda
-    // in material3 1.3.0, so the coroutine is launched here.
+    // cycle is in flight. pullToRefresh's onRefresh is a plain (non-suspend)
+    // lambda in material3 1.3.0, so the coroutine is launched here.
     fun pullRefresh() {
+        if (cycling) return
+        cycling = true
         scope.launch {
             isRefreshing = true
-            handleStatus(fetchStatus())
+            runRefresh()
             isRefreshing = false
         }
     }
 
-    // Auto-refresh every 15s
+    // Auto-refresh every 15s (paused while disconnected: recovery happens
+    // via the Retry button / toolbar / pull-to-refresh instead).
     LaunchedEffect(Unit) {
         while (true) {
-            refresh()
+            if (!disconnected) refresh()
             delay(15_000)
         }
     }
@@ -147,6 +182,15 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             )
         },
     ) { pad ->
+        if (disconnected) {
+            DisconnectedScreen(
+                attempts = retryAttempts,
+                retrying = cycling,
+                onRetry = { refresh() },
+                modifier = Modifier.padding(pad),
+            )
+            return@Scaffold
+        }
         // Plain (non-Lazy) Column inside a pullToRefresh Box: unlike a
         // LazyColumn, a short list that fits on screen still reports the
         // unconsumed downward drag, so pull-to-refresh works with a few
