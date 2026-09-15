@@ -74,6 +74,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     fun refresh() {
         if (cycling) return
         cycling = true
+        retryAttempts = 0
         scope.launch {
             val result = runFetchCycle(
                 tracker,
@@ -91,7 +92,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                     status = parseStatusArray(result.body).firstOrNull { it.id == serverId }
                     error = ""
                 }
-                result.code == 401 -> {
+                Disconnect.requiresReauth(result.code) -> {
                     // Token rejected by a REACHABLE backend: back to login.
                     disconnected = false
                     onAuthError()

@@ -106,7 +106,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 Prefs.setCache(context, result.body)
                 ServerWidget.refreshAll(context)
             }
-            result.code == 401 -> {
+            Disconnect.requiresReauth(result.code) -> {
                 // Token rejected by a REACHABLE backend: back to login.
                 disconnected = false
                 onAuthError()
@@ -127,6 +127,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     fun refresh() {
         if (cycling) return
         cycling = true
+        retryAttempts = 0
         scope.launch { runRefresh() }
     }
 
