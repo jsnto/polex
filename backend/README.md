@@ -57,6 +57,7 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | DELETE | `/api/servers/:id`     | yes  | remove server                      |
 | GET    | `/api/status`          | yes  | live status of all servers         |
 | POST   | `/api/servers/:id/wol` | yes  | send Wake-on-LAN packet            |
+| GET    | `/api/version`         | yes  | backend version `{"version":"…"}` (constant `Version` in `version.go`) |
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
 after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.

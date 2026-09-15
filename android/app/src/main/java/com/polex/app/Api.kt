@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 /** Tiny OkHttp-based REST client. All calls are blocking; run on Dispatchers.IO. */
 object Api {
@@ -57,6 +58,20 @@ object Api {
                 Result(-1, e.message ?: "connection failed")
             }
         }
+
+    /**
+     * GET /api/version → the backend's version string, or null when the
+     * backend is unreachable or the response is unusable. Null means
+     * "unknown", NOT a version mismatch (a connection failure is not a
+     * mismatch — see `outdatedSide` in Versions.kt).
+     */
+    suspend fun getBackendVersion(context: Context): String? {
+        val r = safe { request("GET", "${base(context)}/api/version") }
+        if (r.code != 200) return null
+        return runCatching { JSONObject(r.body).optString("version") }
+            .getOrNull()
+            .takeIf { !it.isNullOrBlank() }
+    }
 
     /** POSTs a WOL magic packet for a server; callers check [Result.code] + [parseOk]. */
     suspend fun sendWol(context: Context, serverId: Int): Result =

@@ -521,6 +521,7 @@ func main() {
 		auth.DELETE("/servers/:id", st.deleteServer)
 		auth.GET("/status", st.listStatus)
 		auth.POST("/servers/:id/wol", st.sendWol)
+		auth.GET("/version", st.version)
 	}
 
 	log.Printf("polex-backend listening on %s (check interval %s, auth on)", addr, interval)

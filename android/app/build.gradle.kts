@@ -33,6 +33,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.VERSION_NAME (app version shown in settings)
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

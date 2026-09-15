@@ -58,14 +58,21 @@ every in-app status poll, and on the widget's system update tick
   `Api.Result.code == -1`) is "disconnected": the token/session are kept and
   the app retries 3× at 2 s then offers a manual Retry page — policy lives in
   `android/.../Disconnect.kt` (shared by dashboard and detail page).
+- The backend version has one source of truth: `const Version` in
+  `backend/version.go`, served by `GET /api/version` (behind the token
+  middleware). The app shows it beside its own `BuildConfig.VERSION_NAME`
+  on the settings menu footer; the mismatch compare/highlight logic is
+  `android/.../Versions.kt` (tests: `VersionsTest.kt`). When bumping one
+  side's version, bump the other's constant/versionName to match.
 - Backend config is persisted in `backend/data.json` (plain run) or
   `backend/data/data.json` (Docker run). Both are gitignored. Do not commit.
   Login credentials come from `backend/.env` (gitignored; template in
   `.env.example`) — never hardcode them or commit a real `.env`.
 - The backend runs plain HTTP on the LAN; token auth is the only intended
   protection. Do not add TLS scaffolding unless asked.
-- Backend: no test suite yet; verify changes with `go vet ./...` and a live
-  `curl` round-trip (see `backend/AGENTS.md` for the smoke test).
+- Backend: tiny test suite (`version_test.go`); verify changes with
+  `go vet ./...`, `go test ./...`, and a live `curl` round-trip (see
+  `backend/AGENTS.md` for the smoke test).
 - Android: JVM unit tests live in `android/app/src/test/` (no device needed);
   run them with `gradle :app:testDebugUnitTest` alongside `:app:assembleDebug`.
 - README files double as the API contract documentation — keep them in sync.
@@ -111,6 +118,7 @@ the emulator's launcher).
 | Change health logic      | `backend/main.go: checkServer` (→ `checkHost` / `pingHost`) |
 | Change WOL behaviour     | `backend/wol.go`              |
 | Change API routes        | `backend/main.go: main()`     |
+| Change backend version   | `backend/version.go` (constant `Version`) |
 | Change auth/login        | `backend/auth.go` + `env.go`  |
 | Change dashboard UI      | `android/.../MainScreen.kt`   |
 | Change server detail page| `android/.../ServerDetailScreen.kt` |

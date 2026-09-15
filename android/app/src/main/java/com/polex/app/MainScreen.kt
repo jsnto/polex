@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 
 val OnlineGreen = Color(0xFF4CAF50)
 val OfflineRed = Color(0xFFF44336)
+val WarnAmber = Color(0xFFFB8C00)   // version mismatch highlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
