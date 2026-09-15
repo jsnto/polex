@@ -106,6 +106,80 @@ class DisconnectTest {
         assertTrue(tracker.exhausted)
     }
 
+    // ---- screen show/hide policy (when the disconnected screen appears) ---
+
+    @Test
+    fun screenNeverAppearsWhenAQuietRetryRecovers() = runTest {
+        val tracker = RetryTracker()
+        var visible = false
+        var reported = 0
+        var calls = 0
+        // First fetch fails at the connection level; a silent auto-retry
+        // recovers before the cycle exhausts.
+        val result = runFetchCycle(tracker, delayMs = 200, onAttempt = { n ->
+            // While the app is connected (screen not shown), mid-cycle
+            // attempts must stay completely silent — no progress, no flip.
+            if (visible) reported = n
+        }) {
+            calls++
+            if (calls == 1) Api.Result(-1, "brief blip") else Api.Result(200, "[]")
+        }
+        assertEquals(200, result.code)
+        assertEquals(2, calls) // initial + 1 auto-retry
+        assertEquals(0, reported)
+        visible = Disconnect.screenVisibleAfterCycle(result.code)
+        assertFalse(visible)
+    }
+
+    @Test
+    fun screenAppearsOnlyAfterAllSilentRetriesFail() = runTest {
+        val tracker = RetryTracker()
+        var visible = false
+        var reported = 0
+        var calls = 0
+        // Every fetch in the cycle fails at the connection level.
+        val result = runFetchCycle(tracker, delayMs = 200, onAttempt = { n ->
+            if (visible) reported = n
+        }) {
+            calls++
+            Api.Result(-1, "still down")
+        }
+        assertEquals(4, calls) // initial + 3 silent auto-retries
+        assertEquals(0, reported) // nothing shown while the tests ran
+        visible = Disconnect.screenVisibleAfterCycle(result.code)
+        assertTrue(visible) // only after the cycle is exhausted
+        assertEquals(Disconnect.MAX_AUTO_ATTEMPTS, tracker.attempts)
+    }
+
+    @Test
+    fun screenClearsWhenManualRetryCycleRecovers() = runTest {
+        val tracker = RetryTracker()
+        // Cycle 1 (app connected): everything fails -> screen appears.
+        var visible = runFetchCycle(tracker, delayMs = 200) {
+            Api.Result(-1, "down")
+        }.let { Disconnect.screenVisibleAfterCycle(it.code) }
+        assertTrue(visible)
+
+        // User taps Retry from the screen: a fresh cycle whose live progress
+        // the screen DOES update (it is already visible)…
+        var progress = 0
+        runFetchCycle(tracker, delayMs = 200, onAttempt = { n ->
+            if (visible) progress = n
+        }) {
+            when {
+                progress == 0 -> Api.Result(-1, "still down")
+                else -> Api.Result(200, "[]")
+            }
+        }
+        assertTrue(progress > 0) // live "Auto-retry X of 3…" while on the screen
+
+        // …and recovers: the screen clears.
+        visible = runFetchCycle(tracker, delayMs = 200) {
+            Api.Result(200, "[]")
+        }.let { Disconnect.screenVisibleAfterCycle(it.code) }
+        assertFalse(visible)
+    }
+
     // ---- session handling: disconnection must not log the user out ---------
 
     @Test

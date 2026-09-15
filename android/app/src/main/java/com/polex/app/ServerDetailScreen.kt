@@ -79,8 +79,11 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
             val result = runFetchCycle(
                 tracker,
                 onAttempt = { n ->
-                    disconnected = true
-                    retryAttempts = n
+                    // Silent while the app is connected: the screen only
+                    // appears after the cycle exhausts (below). While it is
+                    // already visible (a manual-Retry cycle) keep its live
+                    // progress.
+                    if (disconnected) retryAttempts = n
                 },
             ) { Api.safe { Api.get("${Api.base(context)}/api/status") } }
             cycling = false
@@ -98,9 +101,12 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                     onAuthError()
                     return@launch
                 }
-                Disconnect.isDisconnected(result.code) -> {
-                    // Auto-retries exhausted; the disconnected page's Retry
-                    // button starts a new cycle.
+                // The screen appears only when the cycle ends at the
+                // connection level — i.e. only after every silent
+                // auto-retry failed. Its Retry button starts a new cycle.
+                Disconnect.screenVisibleAfterCycle(result.code) -> {
+                    disconnected = true
+                    retryAttempts = tracker.attempts
                 }
                 else -> {
                     // Reachable backend, other error: keep the inline bar.

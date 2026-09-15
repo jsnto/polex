@@ -40,6 +40,22 @@ object Disconnect {
 
     /** True when the request never reached the backend (network-level failure). */
     fun isDisconnected(code: Int): Boolean = code == -1
+
+    /**
+     * The single decision that moves the UI between the connected screens
+     * and the [DisconnectedScreen], evaluated once after a fetch cycle
+     * finishes.
+     *
+     * A cycle only ends disconnected when its final fetch still failed at
+     * the connection level — i.e. the initial failure survived all
+     * [MAX_AUTO_ATTEMPTS] silent auto-retries (no UI change while they
+     * ran). Any other final code (success, 401, reachable-server error)
+     * means the backend is reachable, so the screen must not appear and a
+     * visible one is cleared. The screens never flip mid-cycle while the
+     * app is connected: `onAttempt` progress is only shown on a screen
+     * that is already visible (a manual Retry cycle).
+     */
+    fun screenVisibleAfterCycle(finalCode: Int): Boolean = isDisconnected(finalCode)
 }
 
 /**
@@ -81,7 +97,10 @@ class RetryTracker {
  * Returns as soon as [fetch] produces any non-disconnected result (success,
  * 401, or a reachable-server error) or when the auto-retries are exhausted.
  * [onAttempt] fires after each failed auto-retry (with its 1-based number)
- * so the UI can show live progress.
+ * so an already-visible disconnected screen can show live progress; while
+ * the app is connected the caller ignores it and lets the retries run
+ * silently (the screen only appears via
+ * [Disconnect.screenVisibleAfterCycle] after the cycle finishes).
  */
 suspend fun runFetchCycle(
     tracker: RetryTracker,
@@ -101,8 +120,9 @@ suspend fun runFetchCycle(
 }
 
 /**
- * Dedicated full-screen disconnected state: shown whenever the app's last
- * fetch failed at the connection level. Makes clear the backend could not
+ * Dedicated full-screen disconnected state: shown only when a fetch cycle
+ * ends at the connection level (after all auto-retries failed; see
+ * [Disconnect.screenVisibleAfterCycle]). Makes clear the backend could not
  * be reached, that the user is still signed in, how many auto-retries were
  * attempted, and offers a Retry button (a tap restarts the 3-attempt cycle).
  */

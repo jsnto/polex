@@ -91,8 +91,10 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
         val result = runFetchCycle(
             tracker,
             onAttempt = { n ->
-                disconnected = true
-                retryAttempts = n
+                // Silent while the app is connected: the screen only appears
+                // after the cycle exhausts (below). While it is already
+                // visible (a manual-Retry cycle) keep its live progress.
+                if (disconnected) retryAttempts = n
             },
         ) { fetchStatus() }
         cycling = false
@@ -112,9 +114,12 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 disconnected = false
                 onAuthError()
             }
-            Disconnect.isDisconnected(result.code) -> {
-                // Auto-retries exhausted; the disconnected page's Retry
-                // button (or the toolbar/pull-to-refresh) starts a new cycle.
+            // The screen appears only when the cycle ends at the connection
+            // level — i.e. only after every silent auto-retry failed. Its
+            // Retry button (or the toolbar/pull-to-refresh) starts a new cycle.
+            Disconnect.screenVisibleAfterCycle(result.code) -> {
+                disconnected = true
+                retryAttempts = tracker.attempts
             }
             else -> {
                 // Reachable backend, other error: keep the inline error bar.
