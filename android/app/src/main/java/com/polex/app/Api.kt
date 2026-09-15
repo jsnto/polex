@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 /** Tiny OkHttp-based REST client. All calls are blocking; run on Dispatchers.IO. */
 object Api {
@@ -67,8 +68,9 @@ object Api {
     suspend fun getBackendVersion(context: Context): String? {
         val r = safe { request("GET", "${base(context)}/api/version") }
         if (r.code != 200) return null
-        val v = r.body.trim().substringAfter("\"version\":\"").substringBefore('"')
-        return v.takeIf { it.isNotEmpty() }
+        return runCatching { JSONObject(r.body).optString("version") }
+            .getOrNull()
+            .takeIf { it.isNotBlank() }
     }
 
     /** POSTs a WOL magic packet for a server; callers check [Result.code] + [parseOk]. */
