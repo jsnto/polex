@@ -51,18 +51,14 @@ object Disconnect {
  * each separated by [Disconnect.RETRY_DELAY_MS]. When [exhausted], the UI
  * offers a manual Retry button whose tap starts a fresh cycle via [reset].
  */
-class RetryTracker(limit: Int = Disconnect.MAX_AUTO_ATTEMPTS) {
+class RetryTracker {
 
     /** Auto-retries made so far in the current cycle (0 = cycle just started). */
     var attempts: Int = 0
         private set
 
-    private val limit: Int = limit
-
-    val maxAttempts: Int get() = limit
-
     /** No auto-retries remain in the current cycle. */
-    val exhausted: Boolean get() = attempts >= limit
+    val exhausted: Boolean get() = attempts >= Disconnect.MAX_AUTO_ATTEMPTS
 
     /** Records one auto-retry attempt and returns the new count. */
     fun recordAttempt(): Int {

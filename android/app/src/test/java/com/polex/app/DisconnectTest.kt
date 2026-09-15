@@ -18,11 +18,13 @@ class DisconnectTest {
     fun trackerCountsAttemptsUpToMax() {
         val t = RetryTracker()
         assertFalse(t.exhausted)
-        assertEquals(1, t.recordAttempt())
-        assertEquals(2, t.recordAttempt())
-        assertEquals(3, t.recordAttempt())
+        repeat(Disconnect.MAX_AUTO_ATTEMPTS - 1) {
+            t.recordAttempt()
+            assertFalse(t.exhausted)
+        }
+        t.recordAttempt()
+        assertEquals(Disconnect.MAX_AUTO_ATTEMPTS, t.attempts)
         assertTrue(t.exhausted)
-        assertEquals(3, t.maxAttempts)
     }
 
     @Test
