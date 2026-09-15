@@ -58,6 +58,19 @@ object Api {
             }
         }
 
+    /**
+     * GET /api/version → the backend's version string, or null when the
+     * backend is unreachable or the response is unusable. Null means
+     * "unknown", NOT a version mismatch (a connection failure is not a
+     * mismatch — see `outdatedSide` in Versions.kt).
+     */
+    suspend fun getBackendVersion(context: Context): String? {
+        val r = safe { request("GET", "${base(context)}/api/version") }
+        if (r.code != 200) return null
+        val v = r.body.trim().substringAfter("\"version\":\"").substringBefore('"')
+        return v.takeIf { it.isNotEmpty() }
+    }
+
     /** POSTs a WOL magic packet for a server; callers check [Result.code] + [parseOk]. */
     suspend fun sendWol(context: Context, serverId: Int): Result =
         safe { post("${base(context)}/api/servers/$serverId/wol") }

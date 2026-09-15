@@ -19,7 +19,12 @@ Home-lab server status + Wake-on-LAN, from your phone.
   - settings screen to configure the backend URL and add/remove/reorder
     servers (name, IP, MAC, check port, and the check method — TCP or ping).
     The server list supports **drag-and-drop reordering**; all changes are
-    POSTed to the backend;
+    POSTed to the backend. The menu footer shows the **app version**
+    (`BuildConfig.VERSION_NAME`) and the **backend version** (`GET
+    /api/version`); when they differ, the lower (outdated) side is
+    highlighted in amber with a one-line note — an unreachable backend shows
+    "unreachable" and is **not** treated as a mismatch (comparison helpers:
+    `android/.../Versions.kt`, tests in `VersionsTest.kt`);
   - a **home screen widget** (Glance) — a compact panel listing each server
     (green/red dot + name + latency) with the up count and data-freshness
     time on a single bottom line ("2/3 up · updated HH:mm"); tapping it
@@ -121,6 +126,7 @@ unauthenticated calls get `401`.
 | DELETE | `/api/servers/:id`  | remove server                                          |
 | GET    | `/api/status`       | live status: `{id,name,ip,mac,port,check,online,latencyMs,lastChecked,lastWolAt}` |
 | POST   | `/api/servers/:id/wol` | send Wake-on-LAN packet to the server's MAC       |
+| GET    | `/api/version`        | backend version `{"version":"…"}` (constant `Version` in `backend/version.go`) |
 
 WOL packets are sent via UDP to `255.255.255.255:9` **and** to the /24 subnet
 broadcast of the server's IP (e.g. `192.168.1.255:9`), plus any addresses in

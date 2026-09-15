@@ -122,6 +122,13 @@ private fun MenuPane(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    // Version check: show app + backend versions; highlight the LOWER one
+    // when they disagree. A backend that can't be reached is a neutral
+    // state, not a mismatch (outdatedSide returns null when unknown).
+    val appVersion = BuildConfig.VERSION_NAME
+    var backendVersion by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { backendVersion = Api.getBackendVersion(context) }
+    val outdated = outdatedSide(appVersion, backendVersion)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -143,6 +150,19 @@ private fun MenuPane(
         ) {
             MenuRow(icon = Icons.Default.Settings, title = "Backend", subtitle = Prefs.base(context), onClick = onBackend)
             MenuRow(icon = Icons.Filled.Dns, title = "Servers", subtitle = "Add, edit or remove servers", onClick = onServers)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    VersionRow("App version", appVersion, outdated = (outdated == "app"))
+                    VersionRow(
+                        "Backend version",
+                        backendVersion ?: "unreachable",
+                        outdated = (outdated == "backend"),
+                    )
+                    mismatchExplanation(outdated)?.let {
+                        Text(it, color = WarnAmber, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
                 Text("Log out")
@@ -178,6 +198,30 @@ private fun MenuRow(
             }
             Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
         }
+    }
+}
+
+@Composable
+private fun VersionRow(
+    label: String,
+    value: String,
+    outdated: Boolean,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (outdated) WarnAmber else MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (outdated) WarnAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

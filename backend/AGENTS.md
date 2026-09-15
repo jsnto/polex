@@ -42,6 +42,8 @@ the backend runs with `admin`/`polex` and logs a loud `WARN` — never ship that
   `POST /api/login` handler, and the `authMiddleware` bearer-token guard.
 - `env.go` — minimal `.env` loader (`loadDotEnv`).
 - `wol.go` — `buildWoLPacket`, `validMac`, `subnetBroadcast24`, `sendWoL`.
+- `version.go` — backend version constant (`Version`, keep in sync with the
+  app's `versionName`) and the `GET /api/version` handler.
 - `data.json` — runtime config (gitignored), used by a plain `./polex-backend`
   run. Format: `{"servers": [...], "nextId": N}`.
 - `data/` — runtime config dir for the Docker run (`data/data.json`,
