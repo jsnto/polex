@@ -56,7 +56,9 @@ every in-app status poll, and on the widget's system update tick
 - The app stores the token in Prefs after login and re-routes to the login
   screen on a genuine 401. A connection-level failure (backend unreachable,
   `Api.Result.code == -1`) is "disconnected": the token/session are kept and
-  the app retries 3× at 2 s then offers a manual Retry page — policy lives in
+  the app silently retries 3× at 2 s — the manual Retry page appears only
+  when every silent retry fails (`Disconnect.screenVisibleAfterCycle`, the
+  sole show/hide decision) — policy lives in
   `android/.../Disconnect.kt` (shared by dashboard and detail page).
 - The backend version has one source of truth: `const Version` in
   `backend/version.go`, served by `GET /api/version` (behind the token
@@ -128,7 +130,7 @@ the emulator's launcher).
 | Change widget            | `android/.../ServerWidget.kt` |
 | Change networking        | `android/.../Api.kt`          |
 | Change shared config     | `android/.../Prefs.kt`        |
-| Change disconnected/retry| `android/.../Disconnect.kt` (RetryTracker, runFetchCycle, DisconnectedScreen) |
+| Change disconnected/retry| `android/.../Disconnect.kt` (RetryTracker, runFetchCycle, screenVisibleAfterCycle, DisconnectedScreen) |
 
 ## Maintaining this file
 

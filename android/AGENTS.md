@@ -35,8 +35,9 @@ gradle wrapper --gradle-version 8.7
 adb install app/build/outputs/apk/debug/polex-debug.apk
 ```
 
-Or open `android/` in Android Studio. There are no unit/UI tests yet; the
-smoke test is `./scripts/test-emulator.sh` (repo root; Windows equivalent:
+Or open `android/` in Android Studio. JVM unit tests live in `app/src/test/`
+(run per the root `AGENTS.md`); the emulator smoke test is
+`./scripts/test-emulator.sh` (repo root; Windows equivalent:
 `scripts\windows\test-emulator.ps1`) — it boots the
 emulator via `docker-compose.emulator.yml`, installs the APK, launches
 `MainActivity`, and asserts the app window is focused + no fatal logcat
