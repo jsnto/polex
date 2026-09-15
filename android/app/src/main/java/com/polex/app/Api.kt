@@ -70,7 +70,7 @@ object Api {
         if (r.code != 200) return null
         return runCatching { JSONObject(r.body).optString("version") }
             .getOrNull()
-            .takeIf { it.isNotBlank() }
+            .takeIf { !it.isNullOrBlank() }
     }
 
     /** POSTs a WOL magic packet for a server; callers check [Result.code] + [parseOk]. */
