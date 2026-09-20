@@ -30,7 +30,7 @@ func TestLoadAuthConfigTTLFromEnv(t *testing.T) {
 	if cfg.tokenTTL != 12*time.Hour {
 		t.Errorf("tokenTTL = %v, want 12h", cfg.tokenTTL)
 	}
-	if cfg.rememberTTL != 7 * 24 * time.Hour {
+	if cfg.rememberTTL != 7*24*time.Hour {
 		t.Errorf("rememberTTL = %v, want 168h", cfg.rememberTTL)
 	}
 }
