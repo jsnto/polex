@@ -8,8 +8,9 @@ Home-lab server status + Wake-on-LAN, from your phone.
 - **Android app** (Kotlin, Jetpack Compose):
   - **login screen** — signs in via `POST /api/login` and stores the
     returned bearer token; every API call sends it, and a 401 from the
-    backend returns the app to the login screen (token also expires after
-    `POLEX_TOKEN_TTL`, default 30 days);
+    backend returns the app to the login screen (token expires after
+    `POLEX_TOKEN_TTL`, default 30 days). The **remember me** checkbox
+    requests a longer-lived token (30 days, `POLEX_REMEMBER_TTL`);
   - dashboard that auto-refreshes (and refreshes when pulled down) and shows
     each server's status (online dot,
     latency, last wake time) with a **Wake** power button per server (the
@@ -100,6 +101,7 @@ Environment variables:
 | `POLEX_USERNAME` | `admin` | login username                                 |
 | `POLEX_PASSWORD` | `polex` | login password                                 |
 | `POLEX_TOKEN_TTL`| `720h`  | how long an issued auth token stays valid      |
+| `POLEX_REMEMBER_TTL` | `720h` | how long a "remember me" token stays valid    |
 
 Login credentials come from a `.env` file: `cp backend/.env.example
 backend/.env`, then edit `POLEX_USERNAME` / `POLEX_PASSWORD` (the file is
@@ -117,7 +119,7 @@ unauthenticated calls get `401`.
 
 | Method | Path                | Description                                            |
 |--------|---------------------|--------------------------------------------------------|
-| POST   | `/api/login`        | `{username, password}` → `{ok, token}`                 |
+| POST   | `/api/login`        | `{username, password, remember?}` → `{ok, token}` |
 | GET    | `/api/health`       | liveness (public)                                      |
 | GET    | `/api/servers`      | configured servers                                     |
 | POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?}`          |

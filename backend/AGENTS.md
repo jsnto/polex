@@ -25,6 +25,7 @@ go build -o polex-backend .
 | `POLEX_USERNAME` | `admin` | login username (set real value in `.env`)     |
 | `POLEX_PASSWORD` | `polex` | login password (set real value in `.env`)     |
 | `POLEX_TOKEN_TTL`| `720h`  | lifetime of issued auth tokens (Go duration)  |
+| `POLEX_REMEMBER_TTL` | `720h` | lifetime of "remember me" tokens (Go duration) |
 
 `loadDotEnv(".env")` (see `env.go`) reads `KEY=VALUE` from a `.env` file next
 to the working directory before `os.Getenv` is consulted, so a plain run picks
@@ -102,16 +103,18 @@ or, without root, `chmod 777 data`) — otherwise every save logs
 
 Auth: everything under `/api` except `GET /api/health` and `POST /api/login`
 requires `Authorization: Bearer <token>`. A token comes from `POST /api/login`
-(`{username,password}` → `{ok, token}`, `401 {ok:false,error:"invalid credentials"}`
+(`{username,password,remember?}` → `{ok, token}`, `401 {ok:false,error:"invalid credentials"}`
 on bad creds). Protected routes answer `401 {ok:false,error:"unauthorized"}`
 without/with a bad token. Tokens are random 64-hex strings kept in memory
-(`auth.go`), expiring after `POLEX_TOKEN_TTL`; a backend restart invalidates
-all of them (the app's 401 hook re-routes to login).
+(`auth.go`); regular logins expire after `POLEX_TOKEN_TTL`, remember-me logins
+(`remember: true`) after `POLEX_REMEMBER_TTL` (both default 30 days); a
+backend restart invalidates all of them (the app's 401 hook re-routes to
+login).
 
 | Method | Path                 | Notes                                          |
 |--------|----------------------|------------------------------------------------|
 | GET    | `/api/health`        | `{ok, time}` — **public** (used by scripts)   |
-| POST   | `/api/login`         | `{username,password}` → `{ok, token}` — **public** |
+| POST   | `/api/login`         | `{username,password,remember?}` → `{ok, token}` — **public** |
 | GET    | `/api/servers`       | configured servers                             |
 | POST   | `/api/servers`       | body `{name, ip, mac?, port?, check?}` → validates, runs an immediate check |
 | POST   | `/api/servers/reorder` | body `{order: [id, ...]}` → reorders the list (drives display + `/api/status` order) |

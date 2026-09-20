@@ -27,6 +27,7 @@ go run .          # listens on :8080, creates data.json on first run
 | `POLEX_USERNAME` | `admin` | login username (set a real value in `.env`)  |
 | `POLEX_PASSWORD` | `polex` | login password (set a real value in `.env`)  |
 | `POLEX_TOKEN_TTL`| `720h`  | lifetime of issued auth tokens               |
+| `POLEX_REMEMBER_TTL`| `720h` | "remember me" token lifetime (sign-in checkbox) |
 
 Configuration is persisted in `data.json` (seeded with two example servers
 on first run; change entries via the app or this API). Credentials come from
@@ -49,7 +50,7 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | Method | Path                   | Auth | Description                        |
 |--------|------------------------|------|------------------------------------|
 | GET    | `/api/health`          | no   | liveness                           |
-| POST   | `/api/login`           | no   | `{username, password}` → `{ok, token}` (401 on bad creds) |
+| POST   | `/api/login`           | no   | `{username, password, remember?}` → `{ok, token}` (401 on bad creds); `remember: true` grants a token with the `POLEX_REMEMBER_TTL` lifetime |
 | GET    | `/api/servers`         | yes  | configured servers                 |
 | POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?}` |
 | POST   | `/api/servers/reorder` | yes  | set order `{order: [id, ...]}`        |
@@ -61,6 +62,8 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
 after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.
+"Remember me" logins (`remember: true`) instead expire after
+`POLEX_REMEMBER_TTL` (default 30 days).
 
 `GET /api/status` returns:
 
