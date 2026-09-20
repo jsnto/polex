@@ -15,6 +15,7 @@ services:
       POLEX_USERNAME: ${POLEX_USERNAME:-admin}
       POLEX_PASSWORD: ${POLEX_PASSWORD:-polex}
       POLEX_TOKEN_TTL: ${POLEX_TOKEN_TTL:-720h}
+      POLEX_REMEMBER_TTL: ${POLEX_REMEMBER_TTL:-720h}
     volumes:
       - ./data:/app/data         # persists data.json (server list)
     restart: unless-stopped
