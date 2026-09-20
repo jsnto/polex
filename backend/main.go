@@ -495,7 +495,7 @@ func main() {
 
 	st := &state{}
 	st.auth = loadAuthConfig()
-	st.sessions = newSessions(st.auth.tokenTTL)
+	st.sessions = newSessions()
 	st.load()
 	go st.checkLoop(interval)
 

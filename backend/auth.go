@@ -16,24 +16,33 @@ import (
 // ---------- auth config ----------
 
 type authConfig struct {
-	username string
-	password string
-	tokenTTL time.Duration
+	username    string
+	password    string
+	tokenTTL    time.Duration // regular logins (POLEX_TOKEN_TTL)
+	rememberTTL time.Duration // "remember me" logins (POLEX_REMEMBER_TTL)
 }
 
-// loadAuthConfig reads credentials and token TTL. Precedence: process
+// loadAuthConfig reads credentials and token TTLs. Precedence: process
 // environment (also populated from .env by loadDotEnv) over defaults.
 func loadAuthConfig() authConfig {
 	cfg := authConfig{
-		username: os.Getenv("POLEX_USERNAME"),
-		password: os.Getenv("POLEX_PASSWORD"),
-		tokenTTL: 720 * time.Hour, // 30 days
+		username:    os.Getenv("POLEX_USERNAME"),
+		password:    os.Getenv("POLEX_PASSWORD"),
+		tokenTTL:    720 * time.Hour, // 30 days
+		rememberTTL: 720 * time.Hour, // 30 days
 	}
 	if v := os.Getenv("POLEX_TOKEN_TTL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.tokenTTL = d
 		} else {
 			log.Printf("warn: invalid POLEX_TOKEN_TTL %q, using default", v)
+		}
+	}
+	if v := os.Getenv("POLEX_REMEMBER_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.rememberTTL = d
+		} else {
+			log.Printf("warn: invalid POLEX_REMEMBER_TTL %q, using default", v)
 		}
 	}
 	if cfg.username == "" || cfg.password == "" {
@@ -44,19 +53,28 @@ func loadAuthConfig() authConfig {
 	return cfg
 }
 
+// ttlFor returns the token lifetime for a login: remember-me logins get the
+// (default 30-day) remember TTL, all others the regular TTL.
+func (a authConfig) ttlFor(remember bool) time.Duration {
+	if remember {
+		return a.rememberTTL
+	}
+	return a.tokenTTL
+}
+
 // ---------- session store (in-memory) ----------
 
 type sessions struct {
 	mu     sync.Mutex
 	tokens map[string]time.Time // token -> expiry
-	ttl    time.Duration
 }
 
-func newSessions(ttl time.Duration) *sessions {
-	return &sessions{tokens: map[string]time.Time{}, ttl: ttl}
+func newSessions() *sessions {
+	return &sessions{tokens: map[string]time.Time{}}
 }
 
-func (ss *sessions) create() string {
+// create issues a new random token that expires after ttl.
+func (ss *sessions) create(ttl time.Duration) string {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		// crypto/rand never fails on Linux; fall back to time-based
@@ -67,7 +85,7 @@ func (ss *sessions) create() string {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	ss.purge()
-	ss.tokens[token] = time.Now().Add(ss.ttl)
+	ss.tokens[token] = time.Now().Add(ttl)
 	return token
 }
 
@@ -102,6 +120,7 @@ func (ss *sessions) purge() {
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Remember bool   `json:"remember"` // true → longer-lived (remember-me) token
 }
 
 func (s *state) login(c *gin.Context) {
@@ -114,7 +133,7 @@ func (s *state) login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"ok": false, "error": "invalid credentials"})
 		return
 	}
-	token := s.sessions.create()
+	token := s.sessions.create(s.auth.ttlFor(in.Remember))
 	c.JSON(http.StatusOK, gin.H{"ok": true, "token": token})
 }
 

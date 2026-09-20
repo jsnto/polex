@@ -50,9 +50,11 @@ every in-app status poll, and on the widget's system update tick
 - Keep the REST API contract stable; it is the shared boundary between the
   two modules. If you change a field in the status payload, update:
   `backend/main.go` (`StatusView`), `android/.../Model.kt` (`SrvStatus` +
-  `parseStatusArray`), and the README tables. Same for auth responses:
-  `backend/auth.go` (`/api/login` → `{ok, token}`, 401 →
-  `{ok:false,error:...}`) ↔ `android/.../LoginScreen.kt`.
+  `parseStatusArray`), and the README tables. Same for auth: `backend/auth.go`
+  (`/api/login` → `{ok, token}`, 401 → `{ok:false,error:...}`) ↔
+  `android/.../LoginScreen.kt`. Login also takes an optional `remember`
+  (remember-me checkbox → 30-day token via `POLEX_REMEMBER_TTL`; regular
+  logins use `POLEX_TOKEN_TTL`) — token TTLs are per-token in `auth.go`.
 - The app stores the token in Prefs after login and re-routes to the login
   screen on a genuine 401. A connection-level failure (backend unreachable,
   `Api.Result.code == -1`) is "disconnected": the token/session are kept and

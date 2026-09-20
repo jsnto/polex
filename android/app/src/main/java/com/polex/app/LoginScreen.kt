@@ -2,6 +2,7 @@ package com.polex.app
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +38,9 @@ import org.json.JSONObject
 
 /**
  * Login screen. POSTs to /api/login; on success stores the bearer token in
- * [Prefs] + [Api.authToken] and calls [onLogin].
+ * [Prefs] + [Api.authToken] and calls [onLogin]. "Remember me" asks the
+ * backend for a long-lived (30-day) token; the token is stored in the same
+ * protected [Prefs] either way.
  */
 @Composable
 fun LoginScreen(onLogin: () -> Unit) {
@@ -47,6 +51,7 @@ fun LoginScreen(onLogin: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var url by remember { mutableStateOf(Prefs.base(context)) }
     var showUrl by remember { mutableStateOf(false) }
+    var rememberMe by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
@@ -60,6 +65,7 @@ fun LoginScreen(onLogin: () -> Unit) {
             val json = JSONObject().apply {
                 put("username", username)
                 put("password", password)
+                put("remember", rememberMe)
             }.toString()
             val result = Api.safe { Api.post("${Api.base(context)}/api/login", json) }
             when {
@@ -129,6 +135,16 @@ fun LoginScreen(onLogin: () -> Unit) {
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Checkbox(
+                        checked = rememberMe,
+                        onCheckedChange = { rememberMe = it },
+                    )
+                    Text("Keep me signed in (remember me)")
                 }
                 // The backend URL is only editable in Settings after login,
                 // so let it be set here too (physical devices need this —
