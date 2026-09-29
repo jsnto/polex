@@ -468,20 +468,26 @@ func TestShutdownHandlerUnreachable(t *testing.T) {
 }
 
 func TestShutdownHandlerKeyProblems(t *testing.T) {
-	// Missing key file — even with a password configured. A missing key
-	// file is a local config error, not an sshd authentication rejection,
-	// so the password fallback (auth failures only) must not kick in.
-	port, _ := fakeSSHServer(t, "ok")
+	// A key file that fails to load is a failed key: with a password set,
+	// the shutdown proceeds with the password alone and the key error
+	// stays visible in the result; with no password set it is the
+	// distinct local-config error.
+	badDir := t.TempDir()
+	if err := os.WriteFile(badDir+"/bad_key", []byte("not a key"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	oldPort := sshPort
-	sshPort = port
 	defer func() { sshPort = oldPort }()
 
 	srv := Server{ID: 1, Name: "NAS", IP: "127.0.0.1", Port: 22, Check: "tcp",
-		SshUser: "root", SshKeyPath: "/nonexistent/key", SshPassword: testPassword}
+		SshUser: "root", SshKeyPath: "/nonexistent/key"}
 	r, st := newTestBackend(t, srv)
-
-	w := doShutdown(t, r)
 	var resp shutdownResp
+
+	// Missing key file, no password: the hard local-config error.
+	port, _ := fakeSSHServer(t, "ok")
+	sshPort = port
+	w := doShutdown(t, r)
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("body: %v", err)
 	}
@@ -489,13 +495,32 @@ func TestShutdownHandlerKeyProblems(t *testing.T) {
 		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
 	}
 
-	// Invalid key file (not a private key).
-	badDir := t.TempDir()
-	if err := os.WriteFile(badDir+"/bad_key", []byte("not a key"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	// Missing key file, password set: password-only auth succeeds and the
+	// key error stays visible in the result.
+	port, rec := fakeSSHServer(t, "pwok")
+	sshPort = port
 	st.mu.Lock()
-	st.servers[0].SshKeyPath = badDir + "/bad_key"
+	st.servers[0].SshPassword = testPassword
+	st.mu.Unlock()
+	w = doShutdown(t, r)
+	resp = shutdownResp{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if !resp.OK || !strings.Contains(resp.Message, "cannot read ssh key") {
+		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+	if rec.keyOffered.Load() {
+		t.Errorf("a key was offered although the key file could not be read")
+	}
+	if !rec.passwordOffered.Load() {
+		t.Errorf("password was not offered")
+	}
+
+	// Invalid key file, no password: the hard local-config error.
+	st.mu.Lock()
+	st.servers[0] = Server{ID: 1, Name: "NAS", IP: "127.0.0.1", Port: 22, Check: "tcp",
+		SshUser: "root", SshKeyPath: badDir + "/bad_key"}
 	st.mu.Unlock()
 	w = doShutdown(t, r)
 	resp = shutdownResp{}
@@ -503,6 +528,43 @@ func TestShutdownHandlerKeyProblems(t *testing.T) {
 		t.Fatalf("body: %v", err)
 	}
 	if resp.OK || !strings.Contains(resp.Message, "invalid ssh key") {
+		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+
+	// Invalid key file, password set: password-only auth succeeds and the
+	// key error stays visible in the result.
+	port, rec = fakeSSHServer(t, "pwok")
+	sshPort = port
+	st.mu.Lock()
+	st.servers[0].SshPassword = testPassword
+	st.mu.Unlock()
+	w = doShutdown(t, r)
+	resp = shutdownResp{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if !resp.OK || !strings.Contains(resp.Message, "invalid ssh key") {
+		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+	if rec.keyOffered.Load() {
+		t.Errorf("a key was offered although the key file is invalid")
+	}
+	if !rec.passwordOffered.Load() {
+		t.Errorf("password was not offered")
+	}
+
+	// Broken key AND a rejected password: the auth-failure error is
+	// reported after the only usable credential was tried, with the key
+	// error kept visible.
+	port, _ = fakeSSHServer(t, "pwauthfail")
+	sshPort = port
+	w = doShutdown(t, r)
+	resp = shutdownResp{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Message, "ssh authentication failed") ||
+		!strings.Contains(resp.Message, "invalid ssh key") {
 		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
 	}
 }

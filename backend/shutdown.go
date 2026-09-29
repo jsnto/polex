@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,7 +19,10 @@ import (
 // SSH. Credentials are tried in order, key first: when sshKeyPath is set
 // the key is offered, and if sshd rejects it (an authentication failure)
 // the password is offered next within the same handshake. When sshKeyPath
-// is empty, the password is used directly. The private key lives as a file
+// is empty, the password is used directly. A key file that fails to load
+// (missing/unreadable/invalid) is a failed key too: with a password set,
+// the password is used on its own and the key error stays visible in the
+// result text. The private key lives as a file
 // on the backend host (mounted into the container in the Docker deployment);
 // the per-server config holds only a path reference to it, never key
 // material, and the password sits in the same per-server config blob (this
@@ -78,36 +82,47 @@ func shutdownTarget(ip string) string {
 // a second connection — and a key that is ACCEPTED is never followed by a
 // password attempt.
 //
-// A missing/unreadable/invalid key file is a local config error and is
-// reported as-is; it is not an sshd authentication rejection, so it does
-// not trigger the password fallback (nor does any non-auth failure below:
-// the fallback is for authentication failures only).
-func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, error) {
+// It returns the credential list plus a key note: when the key file fails
+// to load (missing/unreadable/invalid) and a password is set, the password
+// is used on its own and the key error is returned as the note, so the
+// caller keeps it visible in the result text; with no password a failed
+// key file is a hard local config error. Non-auth failures later on
+// (timeout, unreachable, OS not responsive) never burn the password
+// fallback.
+func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, string, error) {
 	var auths []ssh.AuthMethod
+	var keyNote string
 	if keyPath != "" {
 		key, err := os.ReadFile(expandHome(keyPath))
 		if err != nil {
-			return nil, fmt.Errorf("cannot read ssh key at %s: %v", keyPath, err)
+			keyNote = fmt.Sprintf("cannot read ssh key at %s: %v", keyPath, err)
+		} else {
+			signer, err := ssh.ParsePrivateKey(key)
+			if err != nil {
+				keyNote = fmt.Sprintf("invalid ssh key at %s: %v", keyPath, err)
+			} else {
+				auths = append(auths, ssh.PublicKeys(signer))
+			}
 		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("invalid ssh key at %s: %v", keyPath, err)
-		}
-		auths = append(auths, ssh.PublicKeys(signer))
 	}
 	if password != "" {
 		auths = append(auths, ssh.Password(password))
 	}
-	return auths, nil
+	if keyNote != "" && password == "" {
+		return nil, "", errors.New(keyNote)
+	}
+	return auths, keyNote, nil
 }
 
 // sshPoweroff connects to addr as user and runs `systemctl poweroff` using
 // the credentials in keyPath/password order (see sshAuthMethods: key first,
-// password as the auth-failure fallback, password directly when no key is
-// configured). It returns a human-facing success message, or an honest,
-// distinct error:
+// password when the key is rejected by sshd or fails to load, password
+// directly when no key is configured). It returns a human-facing success
+// message, or an honest, distinct error:
 //
-//   - the key file is missing/unreadable/invalid on the backend host;
+//   - the key file is missing/unreadable/invalid on the backend host and no
+//     password is set — with a password set, the password is used instead
+//     and the key error stays visible in the result text;
 //   - sshd rejected every configured credential (wrong user, or wrong
 //     key and wrong password) — reported only after all of them were
 //     tried;
@@ -120,7 +135,7 @@ func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, error) {
 // as success: the host is powering off and tears down the SSH session, so
 // the exit status may never arrive.
 func sshPoweroff(addr, user, keyPath, password string) (string, error) {
-	auths, err := sshAuthMethods(keyPath, password)
+	auths, keyNote, err := sshAuthMethods(keyPath, password)
 	if err != nil {
 		return "", err
 	}
@@ -129,7 +144,15 @@ func sshPoweroff(addr, user, keyPath, password string) (string, error) {
 		// the API; guard the direct-call path anyway.
 		return "", fmt.Errorf("no ssh credentials configured for %s", user)
 	}
-	return sshPoweroffWithAuths(addr, user, auths)
+	msg, err := sshPoweroffWithAuths(addr, user, auths)
+	if keyNote == "" {
+		return msg, err
+	}
+	note := fmt.Sprintf("key error: %s (password used)", keyNote)
+	if err != nil {
+		return "", fmt.Errorf("%v; %s", err, note)
+	}
+	return msg + "; " + note, nil
 }
 
 // sshPoweroffWithAuths runs `systemctl poweroff` on addr with the given

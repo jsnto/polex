@@ -124,10 +124,13 @@ connects to `ip:22` with that user and runs `systemctl poweroff`.
 Credentials are tried in order, key first: if the key path is set the key is
 offered, and if sshd rejects it (an authentication failure) the password is
 offered next within the same handshake; with no key path the password is used
-directly. All-empty = power-off disabled (exactly like an empty MAC disabling
-WOL); any incomplete subset (a user with no credential, or credentials
-without a user) is rejected by validation. No extra secret store — the
-password lives in the same per-server config blob as the other fields
+directly. A key file that fails to load (missing, unreadable, invalid) is a
+failed key: with a password set the password is used on its own and the key
+error stays visible in the result text; with no password it is a distinct
+local-config error. All-empty = power-off disabled (exactly like an empty MAC
+disabling WOL); any incomplete subset (a user with no credential, or
+credentials without a user) is rejected by validation. No extra secret store
+— the password lives in the same per-server config blob as the other fields
 (bearer-token-protected home-lab config):
 
 - **The private key is a file on the backend host.** The config blob
@@ -135,14 +138,18 @@ password lives in the same per-server config blob as the other fields
   A leading `~/` is expanded to the backend's home dir. Under Docker, mount
   the key (e.g. `./ssh:/app/ssh:ro`) and use the in-container path
   (`/app/ssh/id_ed25519`) — see `docker-compose.yml`.
-- **Fallback rules:** the password fallback is for *authentication
-  failures only*. A key attempt that fails for a non-auth reason (timeout,
-  unreachable, OS not responsive — the endpoint reports
+- **Fallback rules:** the password fallback is for a *failed key* — a key
+  rejected by sshd (an authentication failure, offered next within the same
+  handshake), or a key *file* that fails to load (missing/unreadable/invalid —
+  the password is then used on its own, and the key error stays visible in
+  the result text; with no password set it is a distinct local-config
+  error). A failure for a non-auth reason (timeout, unreachable, OS not
+  responsive — the endpoint reports
   `ok: false, "server unreachable or OS not responsive: ..."`) does not
-  consume the password, and a missing/invalid key *file* is a local config
-  error (its own distinct message), also not a fallback trigger. The
+  consume the password. The
   `"ssh authentication failed ..."` message is reported only after every
-  configured credential (key, then password when set) was tried.
+  usable configured credential (the key when it loads, then the password
+  when set) was tried.
 - **In-band limit (the wedge case):** this works only while the target's OS
   and sshd are responsive. If the server is wedged or unreachable the
   command cannot run, and the endpoint says so. Out-of-band mechanisms

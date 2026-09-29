@@ -154,9 +154,11 @@ Servers with `sshUser` set plus at least one credential — `sshKeyPath` and/or
 **online** direction: `POST /api/servers/:id/shutdown` runs `systemctl
 poweroff` over SSH). Credentials are tried in order, key first: the key is
 offered, and if sshd rejects it (an authentication failure) the password is
-offered next within the same handshake; with no key path the password is used
-directly. A non-auth failure (unreachable, OS not responsive) never burns the
-password fallback — the fallback is for authentication failures only. The
+offered next within the same handshake; a key file that fails to load
+(missing/unreadable/invalid) falls back to the password on its own when one
+is set, with the key error kept visible in the result; with no key path the
+password is used directly. A non-auth failure (unreachable, OS not
+responsive) never burns the password fallback. The
 power button is dimmed for the power-off direction when the server has no SSH
 config, exactly like Wake is without a MAC. The private key is a **file on
 the backend host** — the config holds only its path (`sshKeyPath`, `~/...`
@@ -237,8 +239,9 @@ adb install android/apk/polex-debug.apk
    don't expose a known open port. The **SSH user** / **SSH key path** /
    **SSH password** fields (all optional) let you power the server off over
    SSH: set the user plus a key path and/or a password, with a key file on
-   the machine running the backend (the key is tried first; a rejected key
-   falls back to the password), and the server's **power** button is active
+   the machine running the backend (the key is tried first; a rejected or
+   broken key falls back to the password when one is set), and the server's
+   **power** button is active
    for the power-off direction. Drag the ⋮ handle to **reorder** the list
    (persisted via `POST /api/servers/reorder`).
 4. On the dashboard, **tap a server** to open its detail page: live status

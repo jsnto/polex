@@ -45,8 +45,9 @@ the backend runs with `admin`/`polex` and logs a loud `WARN` — never ship that
 - `wol.go` — `buildWoLPacket`, `validMac`, `subnetBroadcast24`, `sendWoL`.
 - `shutdown.go` — SSH clean shutdown: `sshPoweroff` (x/crypto/ssh client,
   key then password auth — `sshAuthMethods` orders the credentials, key
-  first, and a key rejected by sshd falls through to the password within
-  the same handshake; `systemctl poweroff`), `sshConfigured` (user + at
+  first, and a key rejected by sshd, or whose file fails to load, falls
+  through to the password when one is set (the key error stays visible in
+  the result); `systemctl poweroff`), `sshConfigured` (user + at
   least one credential), `expandHome`, `shutdownTarget`, the `sshPort` var
   (tests point it at an in-process SSH server).
 - `version.go` — backend version constant (`Version`, keep in sync with the
@@ -163,10 +164,12 @@ in-memory only (cleared on backend restart).
   credential attempt, session start, and the exit-status wait — under the
   app's 5 s read timeout) and runs `systemctl poweroff` with ordered
   credentials: key first, then the password — the password is offered only
-  after sshd rejected the key (an authentication failure) or when no key is
-  configured. A non-auth failure (dial timeout, unreachable host, half-wedged
-  sshd) does NOT burn the password fallback, and a missing/invalid key file
-  is reported as its own distinct local-config error (no fallback). It
+  after sshd rejected the key (an authentication failure), after the key
+  file failed to load (missing/unreadable/invalid — the key error then
+  stays visible in the result text), or when no key is configured. A
+  non-auth failure (dial timeout, unreachable host, half-wedged sshd) does
+  NOT burn the password fallback; a failed key file with no password set is
+  its own distinct local-config error. It
   treats a connection that dies after sshd accepted the command as success
   (the host is powering off), a non-zero exit as failure (remote stderr in
   the message), and dial/handshake/session-start timeout or failure as

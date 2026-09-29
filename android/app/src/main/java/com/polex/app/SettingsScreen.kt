@@ -646,7 +646,7 @@ fun EditServerScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "Power off over SSH: set the SSH user plus a key path and/or password to enable it (online server) — the key is tried first and a rejected key falls back to the password. The key file (if used) must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave the user empty to disable power-off.",
+                        "Power off over SSH: set the SSH user plus a key path and/or password to enable it (online server) — the key is tried first; a rejected key, or a key file that fails to load, falls back to the password when one is set. The key file (if used) must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave the user empty to disable power-off.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

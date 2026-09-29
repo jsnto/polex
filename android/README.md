@@ -46,7 +46,8 @@ screen widget.
     fields (all optional) that enable the server's power-off direction —
     the user plus a key path and/or a password; the key file (if used) must
     exist on the machine running the backend and the key is tried first
-    (a rejected key falls back to the password).
+    (a rejected key — or a key file that fails to load — falls back to the
+    password when one is set).
 - **Home screen widget** (Glance) — at-a-glance list of all servers
   (dot + name + `12ms`/`off`). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
