@@ -43,6 +43,10 @@ the backend runs with `admin`/`polex` and logs a loud `WARN` — never ship that
   `POST /api/login` handler, and the `authMiddleware` bearer-token guard.
 - `env.go` — minimal `.env` loader (`loadDotEnv`).
 - `wol.go` — `buildWoLPacket`, `validMac`, `subnetBroadcast24`, `sendWoL`.
+- `shutdown.go` — SSH clean shutdown: `sshPoweroff` (x/crypto/ssh client,
+  key auth, `systemctl poweroff`), `sshConfigured`, `expandHome`,
+  `shutdownTarget`, the `sshPort` var (tests point it at an in-process
+  SSH server).
 - `version.go` — backend version constant (`Version`, keep in sync with the
   app's `versionName`) and the `GET /api/version` handler.
 - `data.json` — runtime config (gitignored), used by a plain `./polex-backend`
@@ -122,9 +126,12 @@ login).
 | DELETE | `/api/servers/:id`   | removes from list, status cache, and disk      |
 | GET    | `/api/status`        | live status per server                         |
 | POST   | `/api/servers/:id/wol` | sends WOL; returns `{ok, message, lastWolAt}` (200 even on WOL failure — check `ok`) |
+| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`systemctl poweroff`, key auth); 400 when the server has no `sshUser`+`sshKeyPath`; 200 `{ok, message, lastShutdownAt}` (check `ok` — 200 on run failures too) |
 
-`GET /api/status` item: `{id, name, ip, mac, port, check, online, latencyMs, lastChecked, lastWolAt}`.
+`GET /api/status` item: `{id, name, ip, mac, port, check, sshUser, sshKeyPath, online, latencyMs, lastChecked, lastWolAt, lastShutdownAt}`.
 `lastChecked` is `"never"` if the first check hasn't completed.
+`lastWolAt`/`lastShutdownAt` record the last attempt (even failed ones);
+in-memory only (cleared on backend restart).
 
 ## Behaviour notes (don't break these)
 
@@ -146,6 +153,21 @@ login).
   unaffected (IDs are stable; only the array order changes).
 - WOL is sent to `255.255.255.255:9`, the /24 broadcast of the server IP, and
   any `WOL_BROADCAST` entries; at least one send must succeed for `ok: true`.
+- SSH shutdown (`shutdown.go`) is per-server opt-in: `sshConfigured()` needs
+  BOTH `sshUser` and `sshKeyPath` set (like an empty MAC disabling WOL);
+  `normalize()` rejects a half-set pair. `sshPoweroff` dials `ip:22`
+  (`sshPort` var; one 4.5 s total deadline over dial, handshake, session
+  start, and the exit-status wait — under the app's 5 s read timeout, key
+  auth via `x/crypto/ssh`) and runs
+  `systemctl poweroff`; it treats a connection that dies after sshd accepted
+  the command as success (the host is powering off), a non-zero exit as
+  failure (remote stderr in the message), and dial/handshake/session-start
+  timeout or failure as
+  "server unreachable or OS not responsive" (the wedge-case limit — in-band
+  only). The key is a file on the backend host; `data.json` holds only the
+  path. Host-key checking is off (`ssh.InsecureIgnoreHostKey`), matching the
+  plain-HTTP LAN posture. The attempt is recorded in `lastShutdown` (in-memory,
+  like `lastWol`) and `save()` is called, mirroring `sendWol`.
 - Config persistence: every add/update/delete **and reorder** writes the whole list to
   `data.json` (or `data/data.json` under Docker) via `save()`, which is
   **atomic** (write `data.json.tmp` + rename) so a crash mid-write can't
@@ -167,6 +189,8 @@ curl -s -X POST localhost:8080/api/servers \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"test","ip":"127.0.0.1","mac":"aa:bb:cc:dd:ee:ff","port":8080}'
 curl -s -X POST localhost:8080/api/servers/<id>/wol -H "Authorization: Bearer $TOKEN"
+# clean SSH shutdown (server needs sshUser + sshKeyPath; key file on this host):
+curl -s -X POST localhost:8080/api/servers/<id>/shutdown -H "Authorization: Bearer $TOKEN"
 curl -s -X DELETE localhost:8080/api/servers/<id> -H "Authorization: Bearer $TOKEN"
 # unauthenticated must be 401:
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/status   # expect 401

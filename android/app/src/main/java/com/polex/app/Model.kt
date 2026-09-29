@@ -12,10 +12,13 @@ data class SrvStatus(
     val mac: String,
     val port: Int,
     val check: String,   // "tcp" (default) or "ping"
+    val sshUser: String,   // SSH shutdown (with sshKeyPath); empty pair = off
+    val sshKeyPath: String, // path to the private key on the backend host
     val online: Boolean,
     val latencyMs: Long,
     val lastChecked: String,
     val lastWolAt: String,
+    val lastShutdownAt: String,
 )
 
 fun parseStatusArray(body: String): List<SrvStatus> {
@@ -29,10 +32,13 @@ fun parseStatusArray(body: String): List<SrvStatus> {
             mac = o.optString("mac"),
             port = o.optInt("port"),
             check = o.optString("check", "tcp"),
+            sshUser = o.optString("sshUser"),
+            sshKeyPath = o.optString("sshKeyPath"),
             online = o.optBoolean("online"),
             latencyMs = o.optLong("latencyMs"),
             lastChecked = o.optString("lastChecked"),
             lastWolAt = o.optString("lastWolAt"),
+            lastShutdownAt = o.optString("lastShutdownAt"),
         )
     }
 }
@@ -45,6 +51,8 @@ data class SrvEntry(
     val mac: String,
     val port: Int,
     val check: String,   // "tcp" (default) or "ping"
+    val sshUser: String = "",
+    val sshKeyPath: String = "",
 )
 
 fun parseServerArray(body: String): List<SrvEntry> {
@@ -58,17 +66,34 @@ fun parseServerArray(body: String): List<SrvEntry> {
             mac = o.optString("mac"),
             port = o.optInt("port"),
             check = o.optString("check", "tcp"),
+            sshUser = o.optString("sshUser"),
+            sshKeyPath = o.optString("sshKeyPath"),
         )
     }
 }
 
-fun serverToJson(name: String, ip: String, mac: String, port: Int, check: String): String {
+/** True when SSH shutdown is usable for this server (mirrors the backend's
+ *  `sshConfigured`: both the user and the key path must be set — like an
+ *  empty MAC disables WOL). */
+fun SrvStatus.sshConfigured(): Boolean = sshUser.isNotEmpty() && sshKeyPath.isNotEmpty()
+
+fun serverToJson(
+    name: String,
+    ip: String,
+    mac: String,
+    port: Int,
+    check: String,
+    sshUser: String = "",
+    sshKeyPath: String = "",
+): String {
     val o = JSONObject()
     o.put("name", name)
     o.put("ip", ip)
     o.put("mac", mac)
     o.put("port", port)
     o.put("check", check)
+    o.put("sshUser", sshUser)
+    o.put("sshKeyPath", sshKeyPath)
     return o.toString()
 }
 

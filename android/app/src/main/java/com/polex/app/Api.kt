@@ -77,5 +77,9 @@ object Api {
     suspend fun sendWol(context: Context, serverId: Int): Result =
         safe { post("${base(context)}/api/servers/$serverId/wol") }
 
+    /** POSTs a clean SSH shutdown for a server; callers check [Result.code] + [parseOk]. */
+    suspend fun sendShutdown(context: Context, serverId: Int): Result =
+        safe { post("${base(context)}/api/servers/$serverId/shutdown") }
+
     fun base(context: Context): String = Prefs.base(context).trim().trimEnd('/')
 }

@@ -60,7 +60,9 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     var status by remember { mutableStateOf<SrvStatus?>(null) }
     var error by remember { mutableStateOf("") }
     var wolBusy by remember { mutableStateOf(false) }
+    var shutdownBusy by remember { mutableStateOf(false) }
     var wakeConfirm by remember { mutableStateOf(false) }
+    var shutdownConfirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     // Disconnected state (connection-level fetch failure, code -1): shows
     // the same dedicated full-screen page as the dashboard; the
@@ -150,10 +152,26 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
+    fun sendShutdown() {
+        val s = status ?: return
+        if (shutdownBusy || !s.sshConfigured()) return
+        shutdownBusy = true
+        scope.launch {
+            val result = Api.sendShutdown(context, s.id)
+            shutdownBusy = false
+            val ok = result.code in 200..299 && parseOk(result.body)
+            snackbar.showSnackbar(
+                if (ok) "Shutdown command sent to ${s.name}" else "Shutdown failed: ${result.body}"
+            )
+        }
+    }
+
     // Edit mode: take over this screen with the shared add/edit form.
     if (editing) {
         EditServerScreen(
-            server = status?.let { SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check) },
+            server = status?.let {
+                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath)
+            },
             isNew = false,
             onBack = {
                 editing = false
@@ -232,6 +250,12 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                                 online = s.online,
                                 onClick = { wakeConfirm = true },
                             )
+                            Spacer(Modifier.width(8.dp))
+                            ShutdownButton(
+                                enabled = s.sshConfigured() && !shutdownBusy,
+                                busy = shutdownBusy,
+                                onClick = { shutdownConfirm = true },
+                            )
                         }
                         Text(
                             text = if (s.online) "${s.latencyMs} ms" else "unreachable",
@@ -241,6 +265,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                             text = buildList {
                                 add("checked ${relativeTime(s.lastChecked)}")
                                 if (s.lastWolAt.isNotEmpty()) add("last wake ${relativeTime(s.lastWolAt)}")
+                                if (s.lastShutdownAt.isNotEmpty()) add("last shutdown ${relativeTime(s.lastShutdownAt)}")
                             }.joinToString("  ·  "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -259,6 +284,10 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                         DetailRow("IP", s.ip)
                         DetailRow("MAC", if (s.mac.isNotEmpty()) s.mac else "not set (WOL off)")
                         DetailRow("Check", if (s.check == "ping") "ping (ICMP)" else "TCP :${s.port}")
+                        DetailRow(
+                            "SSH",
+                            if (s.sshConfigured()) "as ${s.sshUser} (key ${s.sshKeyPath})" else "not set (shutdown off)",
+                        )
                         OutlinedButton(onClick = { editing = true }) {
                             Text("Edit settings")
                         }
@@ -300,6 +329,38 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
             },
             dismissButton = {
                 TextButton(onClick = { wakeConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Shutdown confirmation dialog.
+    val shutdownTarget = if (shutdownConfirm) status else null
+    shutdownTarget?.let { s ->
+        AlertDialog(
+            onDismissRequest = { shutdownConfirm = false },
+            title = { Text("Shutdown ${s.name}?") },
+            text = {
+                Text(
+                    if (s.sshConfigured()) {
+                        "A clean shutdown (systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
+                    } else {
+                        "This server has no SSH shutdown configured (SSH user + key path), so it cannot be shut down from the app."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        shutdownConfirm = false
+                        sendShutdown()
+                    },
+                    enabled = s.sshConfigured() && !shutdownBusy,
+                ) {
+                    Text("Shutdown", color = OfflineRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { shutdownConfirm = false }) { Text("Cancel") }
             },
         )
     }

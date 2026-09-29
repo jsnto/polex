@@ -525,6 +525,8 @@ fun EditServerScreen(
     var mac by remember { mutableStateOf(server?.mac ?: "") }
     var port by remember { mutableStateOf(server?.port?.toString() ?: "22") }
     var usePing by remember { mutableStateOf(server?.check == "ping") }
+    var sshUser by remember { mutableStateOf(server?.sshUser ?: "") }
+    var sshKeyPath by remember { mutableStateOf(server?.sshKeyPath ?: "") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
@@ -533,7 +535,10 @@ fun EditServerScreen(
         busy = true
         message = ""
         scope.launch {
-            val json = serverToJson(name, ip, mac, port.toIntOrNull() ?: 22, if (usePing) "ping" else "tcp")
+            val json = serverToJson(
+                name, ip, mac, port.toIntOrNull() ?: 22, if (usePing) "ping" else "tcp",
+                sshUser.trim(), sshKeyPath.trim(),
+            )
             val result = Api.safe {
                 if (isNew || server == null) {
                     Api.post("${Api.base(context)}/api/servers", json)
@@ -616,6 +621,25 @@ fun EditServerScreen(
                         }
                         Switch(checked = usePing, onCheckedChange = { usePing = it })
                     }
+                    OutlinedTextField(
+                        value = sshUser,
+                        onValueChange = { sshUser = it },
+                        label = { Text("SSH user (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = sshKeyPath,
+                        onValueChange = { sshKeyPath = it },
+                        label = { Text("SSH key path (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Clean shutdown over SSH (key auth). Set both to enable the Shutdown button — the key file must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave both empty to disable.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             if (message.isNotEmpty()) {
