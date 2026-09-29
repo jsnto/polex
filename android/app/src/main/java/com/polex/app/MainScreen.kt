@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -65,6 +67,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var wolBusy by remember { mutableStateOf(false) }
+    var shutdownBusy by remember { mutableStateOf(false) }
     // Disconnected state (connection-level fetch failure, code -1): shows
     // the dedicated full-screen page; the session/token are left untouched.
     val tracker = remember { RetryTracker() }
@@ -80,6 +83,8 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     val pullState = remember { PullToRefreshState() }
     // Server awaiting wake confirmation (non-null = show the dialog).
     var wakeTarget by remember { mutableStateOf<SrvStatus?>(null) }
+    // Server awaiting shutdown confirmation (non-null = show the dialog).
+    var shutdownTarget by remember { mutableStateOf<SrvStatus?>(null) }
 
     suspend fun fetchStatus(): Api.Result =
         Api.safe { Api.get("${Api.base(context)}/api/status") }
@@ -168,6 +173,19 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             val ok = result.code in 200..299 && parseOk(result.body)
             snackbar.showSnackbar(
                 if (ok) "Wake packet sent to ${s.name}" else "WOL failed: ${result.body}"
+            )
+        }
+    }
+
+    fun sendShutdown(s: SrvStatus) {
+        if (shutdownBusy) return
+        shutdownBusy = true
+        scope.launch {
+            val result = Api.sendShutdown(context, s.id)
+            shutdownBusy = false
+            val ok = result.code in 200..299 && parseOk(result.body)
+            snackbar.showSnackbar(
+                if (ok) "Shutdown command sent to ${s.name}" else "Shutdown failed: ${result.body}"
             )
         }
     }
@@ -273,6 +291,8 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                         s,
                         busy = wolBusy,
                         onWake = { wakeTarget = s },
+                        shutdownBusy = shutdownBusy,
+                        onShutdown = { shutdownTarget = s },
                         onClick = { onOpenServer(s.id) },
                     )
                 }
@@ -311,10 +331,49 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             },
         )
     }
+
+    // Shutdown confirmation dialog.
+    shutdownTarget?.let { s ->
+        AlertDialog(
+            onDismissRequest = { shutdownTarget = null },
+            title = { Text("Shutdown ${s.name}?") },
+            text = {
+                Text(
+                    if (s.sshConfigured()) {
+                        "A clean shutdown (systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
+                    } else {
+                        "This server has no SSH shutdown configured (SSH user + key path), so it cannot be shut down from the app."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val target = s
+                        shutdownTarget = null
+                        sendShutdown(target)
+                    },
+                    enabled = s.sshConfigured() && !shutdownBusy,
+                ) {
+                    Text("Shutdown", color = OfflineRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { shutdownTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
-fun ServerCard(s: SrvStatus, busy: Boolean, onWake: () -> Unit, onClick: () -> Unit) {
+fun ServerCard(
+    s: SrvStatus,
+    busy: Boolean,
+    onWake: () -> Unit,
+    shutdownBusy: Boolean,
+    onShutdown: () -> Unit,
+    onClick: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
             modifier = Modifier
@@ -337,7 +396,8 @@ fun ServerCard(s: SrvStatus, busy: Boolean, onWake: () -> Unit, onClick: () -> U
                 )
                 val meta = buildList {
                     add("checked ${relativeTime(s.lastChecked)}")
-                    if (s.lastWolAt.isNotEmpty()) add("last wake ${s.lastWolAt}")
+                    if (s.lastWolAt.isNotEmpty()) add("last wake ${relativeTime(s.lastWolAt)}")
+                    if (s.lastShutdownAt.isNotEmpty()) add("last shutdown ${relativeTime(s.lastShutdownAt)}")
                 }.joinToString("  ·  ")
                 Text(
                     meta,
@@ -350,6 +410,12 @@ fun ServerCard(s: SrvStatus, busy: Boolean, onWake: () -> Unit, onClick: () -> U
                 busy = busy,
                 online = s.online,
                 onClick = onWake,
+            )
+            Spacer(Modifier.width(8.dp))
+            ShutdownButton(
+                enabled = s.sshConfigured() && !shutdownBusy,
+                busy = shutdownBusy,
+                onClick = onShutdown,
             )
         }
     }
@@ -373,6 +439,23 @@ fun WakeButton(enabled: Boolean, busy: Boolean, online: Boolean, onClick: () -> 
             contentDescription = if (busy) "Waking…" else if (online) "Online" else "Offline — tap to wake",
             tint = tint.copy(alpha = if (enabled) 1f else 0.35f),
             modifier = Modifier.size(28.dp),
+        )
+    }
+}
+
+/** Clean-shutdown control, shared by the dashboard and the server detail
+ *  page. Dimmed (disabled) when the server has no SSH shutdown configured
+ *  (like the wake button without a MAC) or a shutdown is in flight. */
+@Composable
+fun ShutdownButton(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            if (busy) "Shutting down…" else "Shutdown",
+            style = MaterialTheme.typography.labelLarge,
         )
     }
 }

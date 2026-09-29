@@ -20,37 +20,43 @@ import (
 // ---------- models ----------
 
 type Server struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	IP    string `json:"ip"`
-	MAC   string `json:"mac"`   // empty = WOL disabled
-	Port  int    `json:"port"`  // TCP check port (ignored when Check == "ping")
-	Check string `json:"check"` // "tcp" (default) or "ping"
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	IP         string `json:"ip"`
+	MAC        string `json:"mac"`   // empty = WOL disabled
+	Port       int    `json:"port"`  // TCP check port (ignored when Check == "ping")
+	Check      string `json:"check"` // "tcp" (default) or "ping"
+	SshUser    string `json:"sshUser"`    // + SshKeyPath: SSH shutdown (both set = enabled)
+	SshKeyPath string `json:"sshKeyPath"` // path to the private key on the backend host
 }
 
 type StatusView struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	IP          string `json:"ip"`
-	MAC         string `json:"mac"`
-	Port        int    `json:"port"`
-	Check       string `json:"check"`
-	Online      bool   `json:"online"`
-	LatencyMs   int64  `json:"latencyMs"`
-	LastChecked string `json:"lastChecked"`
-	LastWolAt   string `json:"lastWolAt"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	IP             string `json:"ip"`
+	MAC            string `json:"mac"`
+	Port           int    `json:"port"`
+	Check          string `json:"check"`
+	SshUser        string `json:"sshUser"`
+	SshKeyPath     string `json:"sshKeyPath"`
+	Online         bool   `json:"online"`
+	LatencyMs      int64  `json:"latencyMs"`
+	LastChecked    string `json:"lastChecked"`
+	LastWolAt      string `json:"lastWolAt"`
+	LastShutdownAt string `json:"lastShutdownAt"`
 }
 
 // ---------- state ----------
 
 type state struct {
-	mu       sync.RWMutex
-	servers  []Server
-	status   map[int]StatusView
-	lastWol  map[int]string
-	nextID   int
-	auth     authConfig
-	sessions *sessions
+	mu           sync.RWMutex
+	servers      []Server
+	status       map[int]StatusView
+	lastWol      map[int]string
+	lastShutdown map[int]string
+	nextID       int
+	auth         authConfig
+	sessions     *sessions
 }
 
 const dataFile = "data.json"
@@ -65,6 +71,7 @@ func newDefaultServers() []Server {
 func (s *state) load() {
 	s.status = map[int]StatusView{}
 	s.lastWol = map[int]string{}
+	s.lastShutdown = map[int]string{}
 	b, err := os.ReadFile(dataFile)
 	if err != nil {
 		// first run: seed a couple of example servers
@@ -220,16 +227,19 @@ func (s *state) setStatus(sv Server, online bool, ms int64, when string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v := StatusView{
-		ID:          sv.ID,
-		Name:        sv.Name,
-		IP:          sv.IP,
-		MAC:         sv.MAC,
-		Port:        sv.Port,
-		Check:       sv.Check,
-		Online:      online,
-		LatencyMs:   ms,
-		LastChecked: when,
-		LastWolAt:   s.lastWol[sv.ID],
+		ID:             sv.ID,
+		Name:           sv.Name,
+		IP:             sv.IP,
+		MAC:            sv.MAC,
+		Port:           sv.Port,
+		Check:          sv.Check,
+		SshUser:        sv.SshUser,
+		SshKeyPath:     sv.SshKeyPath,
+		Online:         online,
+		LatencyMs:      ms,
+		LastChecked:    when,
+		LastWolAt:      s.lastWol[sv.ID],
+		LastShutdownAt: s.lastShutdown[sv.ID],
 	}
 	s.status[sv.ID] = v
 }
@@ -247,9 +257,16 @@ func normalize(in *Server) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.IP = strings.TrimSpace(in.IP)
 	in.MAC = strings.ToUpper(strings.TrimSpace(in.MAC))
+	in.SshUser = strings.TrimSpace(in.SshUser)
+	in.SshKeyPath = strings.TrimSpace(in.SshKeyPath)
 	in.ID = 0
 	if in.Name == "" || in.IP == "" {
 		return errField("name and ip are required")
+	}
+	// SSH shutdown is an all-or-nothing pair: exactly one of the two set
+	// is always a mistake (key auth needs both; neither = disabled).
+	if (in.SshUser == "") != (in.SshKeyPath == "") {
+		return errField("sshUser and sshKeyPath must both be set (or both left empty)")
 	}
 	if net.ParseIP(in.IP) == nil {
 		return errField("invalid ip: " + in.IP)
@@ -297,7 +314,7 @@ func (s *state) listStatus(c *gin.Context) {
 	for _, sv := range s.servers {
 		v, ok := s.status[sv.ID]
 		if !ok {
-			v = StatusView{ID: sv.ID, Name: sv.Name, IP: sv.IP, MAC: sv.MAC, Port: sv.Port, Check: sv.Check, LastChecked: "never"}
+			v = StatusView{ID: sv.ID, Name: sv.Name, IP: sv.IP, MAC: sv.MAC, Port: sv.Port, Check: sv.Check, SshUser: sv.SshUser, SshKeyPath: sv.SshKeyPath, LastChecked: "never"}
 		}
 		out = append(out, v)
 	}
@@ -373,6 +390,7 @@ func (s *state) deleteServer(c *gin.Context) {
 	s.servers = out
 	delete(s.status, id)
 	delete(s.lastWol, id)
+	delete(s.lastShutdown, id)
 	s.mu.Unlock()
 	if !found {
 		c.JSON(404, gin.H{"error": "server not found"})
@@ -477,6 +495,51 @@ func (s *state) sendWol(c *gin.Context) {
 	c.JSON(200, gin.H{"ok": true, "message": msg, "lastWolAt": now})
 }
 
+// shutdown runs a clean `systemctl poweroff` on the server over SSH (the
+// sendWol shape: look up, validate configured, run, record, respond).
+// The attempt is recorded either way — like lastWolAt, lastShutdownAt
+// marks when the action was last attempted, which the next boot's status
+// still shows (the self-shutdown case: the backend may die mid-request).
+// Returns 200 with ok:false on run failures (unreachable, auth, command
+// failure) so the app can report the message; 400/404 for config/lookup
+// errors, like sendWol.
+func (s *state) shutdown(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"error": "bad id"})
+		return
+	}
+	s.mu.RLock()
+	sv := s.find(id)
+	var user, keyPath, ip string
+	if sv != nil {
+		user, keyPath, ip = sv.SshUser, sv.SshKeyPath, sv.IP
+	}
+	s.mu.RUnlock()
+
+	if sv == nil {
+		c.JSON(404, gin.H{"ok": false, "message": "server not found"})
+		return
+	}
+	if user == "" || keyPath == "" {
+		c.JSON(400, gin.H{"ok": false, "message": "no ssh shutdown configured for this server"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	msg, err := sshPoweroff(shutdownTarget(ip), user, keyPath)
+	s.mu.Lock()
+	s.lastShutdown[id] = now
+	s.mu.Unlock()
+	s.save()
+
+	if err != nil {
+		c.JSON(200, gin.H{"ok": false, "message": err.Error(), "lastShutdownAt": now})
+		return
+	}
+	c.JSON(200, gin.H{"ok": true, "message": msg, "lastShutdownAt": now})
+}
+
 // ---------- main ----------
 
 func main() {
@@ -521,6 +584,7 @@ func main() {
 		auth.DELETE("/servers/:id", st.deleteServer)
 		auth.GET("/status", st.listStatus)
 		auth.POST("/servers/:id/wol", st.sendWol)
+		auth.POST("/servers/:id/shutdown", st.shutdown)
 		auth.GET("/version", st.version)
 	}
 

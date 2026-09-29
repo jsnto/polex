@@ -2,7 +2,8 @@
 
 Go + Gin REST API. Keeps a configurable list of servers, health-checks them
 on an interval (a TCP port connect, or an ICMP ping, per server), and sends
-Wake-on-LAN magic packets on demand.
+Wake-on-LAN magic packets on demand. Servers with optional SSH config can
+also be powered off cleanly (`systemctl poweroff` over SSH, key auth).
 
 > Agent/handler documentation: see [`AGENTS.md`](AGENTS.md).
 
@@ -58,6 +59,7 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | DELETE | `/api/servers/:id`     | yes  | remove server                      |
 | GET    | `/api/status`          | yes  | live status of all servers         |
 | POST   | `/api/servers/:id/wol` | yes  | send Wake-on-LAN packet            |
+| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (`systemctl poweroff`), see below |
 | GET    | `/api/version`         | yes  | backend version `{"version":"…"}` (constant `Version` in `version.go`) |
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
@@ -76,10 +78,13 @@ after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.
     "mac": "AA:BB:CC:DD:EE:01",
     "port": 22,
     "check": "tcp",
+    "sshUser": "root",
+    "sshKeyPath": "/app/keys/polex",
     "online": true,
     "latencyMs": 3,
     "lastChecked": "2026-09-09T01:27:07Z",
-    "lastWolAt": ""
+    "lastWolAt": "",
+    "lastShutdownAt": ""
   }
 ]
 ```
@@ -87,6 +92,12 @@ after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.
 `POST .../wol` returns `{"ok": true, "message": "WOL packet sent to ...", "lastWolAt": "..."}`.
 WOL is sent via UDP to `255.255.255.255:9`, the server's /24 subnet
 broadcast, and any `WOL_BROADCAST` targets.
+
+`POST .../shutdown` powers the server off cleanly over SSH and returns
+`{"ok": true, "message": "shutdown command accepted", "lastShutdownAt": "..."}`
+(200 with `ok: false` + a distinct `message` on failure — check `ok`).
+Both `lastWolAt` and `lastShutdownAt` are recorded when the action is
+*attempted*, even if it fails, and persist until the backend restarts.
 
 ## Health checks
 
@@ -102,6 +113,43 @@ Each server is checked every `CHECK_INTERVAL`. The method is per-server:
 
 If `ping` isn't on `PATH`, ping-based servers report offline and the backend
 logs a warning.
+
+## SSH shutdown
+
+A server with **both** `sshUser` and `sshKeyPath` set gets a **Shutdown**
+action: `POST /api/servers/:id/shutdown` connects to `ip:22` with that user
+and the private key, and runs `systemctl poweroff`. Both fields empty =
+shutdown disabled (exactly like an empty MAC disabling WOL); exactly one set
+is rejected by validation. Key auth only — there is no password-auth path.
+
+- **The private key is a file on the backend host.** The config blob
+  (`data.json`) holds only the *path* (`sshKeyPath`), never key material.
+  A leading `~/` is expanded to the backend's home dir. Under Docker, mount
+  the key (e.g. `./ssh:/app/ssh:ro`) and use the in-container path
+  (`/app/ssh/id_ed25519`) — see `docker-compose.yml`.
+- **In-band limit (the wedge case):** this works only while the target's OS
+  and sshd are responsive. If the server is wedged or unreachable the
+  command cannot run, and the endpoint says so:
+  `ok: false, "server unreachable or OS not responsive: ..."`. Out-of-band
+  mechanisms (BMC, smart plug) are the fallback for that case and are not
+  implemented here.
+- **Success semantics:** `systemctl poweroff` returns as soon as systemd
+  enqueues the job, so the response ("shutdown command accepted") arrives
+  before the machine is actually off. A connection that dies right after the
+  command was accepted is treated as success (the host is powering off and
+  tears down the SSH session). Connect/handshake timeout is 3 s (the class
+  of the health checks).
+- **Self-shutdown:** if the backend host is itself one of the servers, the
+  response may never arrive — the backend powers off mid-request. That is
+  expected: the command was accepted, and the next boot's status still shows
+  `lastShutdownAt` (it is recorded before the run; the in-memory record
+  resets on restart, like `lastWolAt`).
+- **Trust note:** host-key checking is intentionally off
+  (`ssh.InsecureIgnoreHostKey`) — the backend sits on a trusted LAN behind
+  bearer-token auth, matching polex's plain-HTTP posture. A leaked token can
+  now power servers off; keep it as protected as `POLEX_PASSWORD`.
+  The SSH user needs to be able to run `systemctl poweroff` (root, or a
+  polkit/sudo rule on the target).
 
 > **WOL requirements:** the backend must be on the same L2 network as the
 > target machine, and the target's NIC/BIOS must have Wake-on-LAN enabled.
@@ -166,4 +214,7 @@ curl -s -X POST localhost:8080/api/servers \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"nas","ip":"192.168.1.10","mac":"aa:bb:cc:dd:ee:01","port":22}'
 curl -s -X POST localhost:8080/api/servers/1/wol -H "Authorization: Bearer $TOKEN"
+# clean SSH shutdown (server 1 needs sshUser + sshKeyPath set, key file
+# present on the backend host):
+curl -s -X POST localhost:8080/api/servers/1/shutdown -H "Authorization: Bearer $TOKEN"
 ```

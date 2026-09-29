@@ -12,7 +12,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.1"
     }
 
     buildTypes {
@@ -75,4 +75,6 @@ dependencies {
     // Unit tests (JVM, no device/emulator needed)
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    // Real org.json for the JVM unit tests (the platform copy is a stub there).
+    testImplementation("org.json:json:20240303")
 }
