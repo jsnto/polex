@@ -148,11 +148,10 @@ func sshPoweroff(addr, user, keyPath, password string) (string, error) {
 	if keyNote == "" {
 		return msg, err
 	}
-	note := fmt.Sprintf("key error: %s (password used)", keyNote)
 	if err != nil {
-		return "", fmt.Errorf("%v; %s", err, note)
+		return "", fmt.Errorf("%v; key error: %s", err, keyNote)
 	}
-	return msg + "; " + note, nil
+	return fmt.Sprintf("%s; key error: %s (password used)", msg, keyNote), nil
 }
 
 // sshPoweroffWithAuths runs `systemctl poweroff` on addr with the given

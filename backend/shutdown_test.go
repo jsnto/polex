@@ -195,10 +195,10 @@ func fakeSSHServer(t *testing.T, mode string) (int, *authRecorder) {
 		}
 		return nil, nil // accept any key
 	}
-	cfg.PasswordCallback = func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) {
+	cfg.PasswordCallback = func(_ ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 		rec.passwordOffered.Store(true)
-		if mode == "pwok" {
-			return nil, nil // accept the test password (any offered value)
+		if mode == "pwok" && string(pass) == testPassword {
+			return nil, nil
 		}
 		return nil, fmt.Errorf("password rejected")
 	}
@@ -566,6 +566,29 @@ func TestShutdownHandlerKeyProblems(t *testing.T) {
 	if resp.OK || !strings.Contains(resp.Message, "ssh authentication failed") ||
 		!strings.Contains(resp.Message, "invalid ssh key") {
 		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+
+	// Broken key, password set, host unreachable: the non-auth error is
+	// reported with the bare key error — no claim that the password was
+	// used, since no connection completed.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	sshPort = deadPort
+	w = doShutdown(t, r)
+	resp = shutdownResp{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Message, "unreachable or OS not responsive") ||
+		!strings.Contains(resp.Message, "invalid ssh key") {
+		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+	if strings.Contains(resp.Message, "password used") {
+		t.Errorf("message claims the password was used although no connection completed: %q", resp.Message)
 	}
 }
 
