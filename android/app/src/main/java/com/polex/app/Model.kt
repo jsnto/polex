@@ -12,8 +12,9 @@ data class SrvStatus(
     val mac: String,
     val port: Int,
     val check: String,   // "tcp" (default) or "ping"
-    val sshUser: String,   // SSH shutdown (with sshKeyPath); empty pair = off
+    val sshUser: String,   // SSH power-off (with sshKeyPath and/or sshPassword); user alone = off
     val sshKeyPath: String, // path to the private key on the backend host
+    val sshPassword: String, // password auth; fallback after a rejected key (direct when no key)
     val online: Boolean,
     val latencyMs: Long,
     val lastChecked: String,
@@ -34,6 +35,7 @@ fun parseStatusArray(body: String): List<SrvStatus> {
             check = o.optString("check", "tcp"),
             sshUser = o.optString("sshUser"),
             sshKeyPath = o.optString("sshKeyPath"),
+            sshPassword = o.optString("sshPassword"),
             online = o.optBoolean("online"),
             latencyMs = o.optLong("latencyMs"),
             lastChecked = o.optString("lastChecked"),
@@ -53,6 +55,7 @@ data class SrvEntry(
     val check: String,   // "tcp" (default) or "ping"
     val sshUser: String = "",
     val sshKeyPath: String = "",
+    val sshPassword: String = "",
 )
 
 fun parseServerArray(body: String): List<SrvEntry> {
@@ -68,14 +71,15 @@ fun parseServerArray(body: String): List<SrvEntry> {
             check = o.optString("check", "tcp"),
             sshUser = o.optString("sshUser"),
             sshKeyPath = o.optString("sshKeyPath"),
+            sshPassword = o.optString("sshPassword"),
         )
     }
 }
 
-/** True when SSH shutdown is usable for this server (mirrors the backend's
- *  `sshConfigured`: both the user and the key path must be set — like an
- *  empty MAC disables WOL). */
-fun SrvStatus.sshConfigured(): Boolean = sshUser.isNotEmpty() && sshKeyPath.isNotEmpty()
+/** True when SSH power-off is usable for this server (mirrors the backend's
+ *  `sshConfigured`: the user plus at least one credential — key path and/or
+ *  password — like an empty MAC disables WOL). */
+fun SrvStatus.sshConfigured(): Boolean = sshUser.isNotEmpty() && (sshKeyPath.isNotEmpty() || sshPassword.isNotEmpty())
 
 fun serverToJson(
     name: String,
@@ -85,6 +89,7 @@ fun serverToJson(
     check: String,
     sshUser: String = "",
     sshKeyPath: String = "",
+    sshPassword: String = "",
 ): String {
     val o = JSONObject()
     o.put("name", name)
@@ -94,6 +99,7 @@ fun serverToJson(
     o.put("check", check)
     o.put("sshUser", sshUser)
     o.put("sshKeyPath", sshKeyPath)
+    o.put("sshPassword", sshPassword)
     return o.toString()
 }
 

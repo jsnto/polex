@@ -52,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -527,6 +528,7 @@ fun EditServerScreen(
     var usePing by remember { mutableStateOf(server?.check == "ping") }
     var sshUser by remember { mutableStateOf(server?.sshUser ?: "") }
     var sshKeyPath by remember { mutableStateOf(server?.sshKeyPath ?: "") }
+    var sshPassword by remember { mutableStateOf(server?.sshPassword ?: "") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
@@ -537,7 +539,7 @@ fun EditServerScreen(
         scope.launch {
             val json = serverToJson(
                 name, ip, mac, port.toIntOrNull() ?: 22, if (usePing) "ping" else "tcp",
-                sshUser.trim(), sshKeyPath.trim(),
+                sshUser.trim(), sshKeyPath.trim(), sshPassword.trim(),
             )
             val result = Api.safe {
                 if (isNew || server == null) {
@@ -635,8 +637,16 @@ fun EditServerScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    OutlinedTextField(
+                        value = sshPassword,
+                        onValueChange = { sshPassword = it },
+                        label = { Text("SSH password (optional)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Text(
-                        "Clean shutdown over SSH (key auth). Set both to enable the Shutdown button — the key file must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave both empty to disable.",
+                        "Power off over SSH: set the SSH user plus a key path and/or password to enable it (online server) — the key is tried first and a rejected key falls back to the password. The key file (if used) must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave the user empty to disable power-off.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -13,15 +13,22 @@ import (
 
 // ---------- SSH shutdown ----------
 //
-// A server with both sshUser and sshKeyPath set can be powered off with a
-// clean `systemctl poweroff` over SSH (key auth only — no password auth).
-// The private key lives as a file on the backend host (mounted into the
-// container in the Docker deployment); the per-server config holds only a
-// path reference to it, never key material. This is an in-band action: it
-// works only while the target's OS (and sshd) are responsive. If the
-// server is wedged or unreachable, the command cannot run — that limit is
-// reported honestly by sshPoweroff, and an out-of-band mechanism (BMC,
-// smart plug) is the fallback for that case.
+// A server with sshUser set plus at least one credential (sshKeyPath and/or
+// sshPassword) can be powered off with a clean `systemctl poweroff` over
+// SSH. Credentials are tried in order, key first: when sshKeyPath is set
+// the key is offered, and if sshd rejects it (an authentication failure)
+// the password is offered next within the same handshake. When sshKeyPath
+// is empty, the password is used directly. The private key lives as a file
+// on the backend host (mounted into the container in the Docker deployment);
+// the per-server config holds only a path reference to it, never key
+// material, and the password sits in the same per-server config blob (this
+// is bearer-token-protected home-lab config — no extra secret store).
+//
+// This is an in-band action: it works only while the target's OS (and
+// sshd) are responsive. If the server is wedged or unreachable, the
+// command cannot run — that limit is reported honestly by sshPoweroff, and
+// an out-of-band mechanism (BMC, smart plug) is the fallback for that
+// case.
 //
 // Host-key checking is intentionally off (ssh.InsecureIgnoreHostKey): the
 // backend sits on a trusted LAN behind bearer-token auth, which matches
@@ -41,9 +48,10 @@ var sshTotalTimeout = 4500 * time.Millisecond
 var sshPort = 22
 
 // sshConfigured reports whether the server has enough SSH shutdown config
-// to offer the action (both fields set — like an empty MAC disabling WOL).
+// to offer the action (a user plus at least one credential — like an empty
+// MAC disabling WOL). Single source of truth for the predicate.
 func (sv Server) sshConfigured() bool {
-	return sv.SshUser != "" && sv.SshKeyPath != ""
+	return sv.SshUser != "" && (sv.SshKeyPath != "" || sv.SshPassword != "")
 }
 
 // expandHome turns a leading "~" into $HOME for key paths; other paths are
@@ -63,38 +71,79 @@ func shutdownTarget(ip string) string {
 	return net.JoinHostPort(ip, strconv.Itoa(sshPort))
 }
 
-// sshPoweroff connects to addr (user + private key from keyPath) and runs
-// `systemctl poweroff`. It returns a human-facing success message, or an
-// honest, distinct error:
+// sshAuthMethods builds the ordered credential list from the per-server
+// config: key first (when a key path is set), then the password (when set).
+// x/crypto/ssh offers the methods in this order within one handshake, so a
+// key rejected by sshd automatically falls through to the password without
+// a second connection — and a key that is ACCEPTED is never followed by a
+// password attempt.
+//
+// A missing/unreadable/invalid key file is a local config error and is
+// reported as-is; it is not an sshd authentication rejection, so it does
+// not trigger the password fallback (nor does any non-auth failure below:
+// the fallback is for authentication failures only).
+func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, error) {
+	var auths []ssh.AuthMethod
+	if keyPath != "" {
+		key, err := os.ReadFile(expandHome(keyPath))
+		if err != nil {
+			return nil, fmt.Errorf("cannot read ssh key at %s: %v", keyPath, err)
+		}
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ssh key at %s: %v", keyPath, err)
+		}
+		auths = append(auths, ssh.PublicKeys(signer))
+	}
+	if password != "" {
+		auths = append(auths, ssh.Password(password))
+	}
+	return auths, nil
+}
+
+// sshPoweroff connects to addr as user and runs `systemctl poweroff` using
+// the credentials in keyPath/password order (see sshAuthMethods: key first,
+// password as the auth-failure fallback, password directly when no key is
+// configured). It returns a human-facing success message, or an honest,
+// distinct error:
 //
 //   - the key file is missing/unreadable/invalid on the backend host;
-//   - sshd rejected the key (wrong user or key);
+//   - sshd rejected every configured credential (wrong user, or wrong
+//     key and wrong password) — reported only after all of them were
+//     tried;
 //   - the server is unreachable or its OS is not responsive (the known
-//     wedge-case limit of in-band shutdown);
+//     wedge-case limit of in-band shutdown); a key attempt that fails for
+//     such a non-auth reason never burns the password fallback;
 //   - the remote command failed (non-zero exit, e.g. no systemd).
 //
 // A connection that dies right after sshd accepted the command is treated
 // as success: the host is powering off and tears down the SSH session, so
 // the exit status may never arrive.
-func sshPoweroff(addr, user, keyPath string) (string, error) {
-	key, err := os.ReadFile(expandHome(keyPath))
+func sshPoweroff(addr, user, keyPath, password string) (string, error) {
+	auths, err := sshAuthMethods(keyPath, password)
 	if err != nil {
-		return "", fmt.Errorf("cannot read ssh key at %s: %v", keyPath, err)
+		return "", err
 	}
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return "", fmt.Errorf("invalid ssh key at %s: %v", keyPath, err)
+	if len(auths) == 0 {
+		// The handler gates on sshConfigured, so this is unreachable via
+		// the API; guard the direct-call path anyway.
+		return "", fmt.Errorf("no ssh credentials configured for %s", user)
 	}
+	return sshPoweroffWithAuths(addr, user, auths)
+}
 
-	// One total deadline for the whole sequence. x/crypto/ssh's dial
-	// timeout only bounds the TCP connect, so the handshake is bounded by
-	// a deadline on the conn itself, and the session start and exec wait
-	// race the same deadline.
+// sshPoweroffWithAuths runs `systemctl poweroff` on addr with the given
+// ordered credentials.
+func sshPoweroffWithAuths(addr, user string, auths []ssh.AuthMethod) (string, error) {
+	// One total deadline for the WHOLE sequence — every credential
+	// attempt included. x/crypto/ssh's dial timeout only bounds the TCP
+	// connect, so the handshake is bounded by a deadline on the conn
+	// itself, and the session start and exec wait race the same deadline.
 	deadline := time.Now().Add(sshTotalTimeout)
 
 	cfg := &ssh.ClientConfig{
 		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		Auth:            auths,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // trusted LAN; see above
 	}
 	conn, err := net.DialTimeout("tcp", addr, time.Until(deadline))
@@ -107,9 +156,13 @@ func sshPoweroff(addr, user, keyPath string) (string, error) {
 	if err != nil {
 		conn.Close()
 		// x/crypto/ssh has no exported auth-failure type; its handshake
-		// error text is the discriminator (client_auth.go).
+		// error text is the discriminator (client_auth.go). This is only
+		// reached when sshd actively REJECTED every offered credential —
+		// a timeout or unreachable host produces a different error below,
+		// which is a non-auth failure and never burns the password
+		// fallback.
 		if strings.Contains(err.Error(), "unable to authenticate") {
-			return "", fmt.Errorf("ssh authentication failed for %s@%s (wrong user or key?)", user, addr)
+			return "", fmt.Errorf("ssh authentication failed for %s@%s (wrong user or credentials?)", user, addr)
 		}
 		return "", fmt.Errorf("server unreachable or OS not responsive: %v", err)
 	}

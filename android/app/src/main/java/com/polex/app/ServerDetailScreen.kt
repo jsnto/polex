@@ -59,10 +59,10 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
 
     var status by remember { mutableStateOf<SrvStatus?>(null) }
     var error by remember { mutableStateOf("") }
-    var wolBusy by remember { mutableStateOf(false) }
-    var shutdownBusy by remember { mutableStateOf(false) }
-    var wakeConfirm by remember { mutableStateOf(false) }
-    var shutdownConfirm by remember { mutableStateOf(false) }
+    // The single power control is in flight (wake packet or power-off
+    // command being sent).
+    var powerBusy by remember { mutableStateOf(false) }
+    var powerConfirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     // Disconnected state (connection-level fetch failure, code -1): shows
     // the same dedicated full-screen page as the dashboard; the
@@ -140,28 +140,28 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
-    fun sendWol() {
+    /** The single power action, chosen by the server's current state:
+     *  online → power off over SSH, offline → send a wake packet. */
+    fun sendPower() {
         val s = status ?: return
-        if (wolBusy || s.mac.isEmpty()) return
-        wolBusy = true
-        scope.launch {
-            val result = Api.sendWol(context, s.id)
-            wolBusy = false
-            val ok = result.code in 200..299 && parseOk(result.body)
-            snackbar.showSnackbar(if (ok) "Wake packet sent to ${s.name}" else "WOL failed: ${result.body}")
+        if (powerBusy) return
+        if (s.online) {
+            if (!s.sshConfigured()) return
+        } else {
+            if (s.mac.isEmpty()) return
         }
-    }
-
-    fun sendShutdown() {
-        val s = status ?: return
-        if (shutdownBusy || !s.sshConfigured()) return
-        shutdownBusy = true
+        powerBusy = true
         scope.launch {
-            val result = Api.sendShutdown(context, s.id)
-            shutdownBusy = false
+            val result = if (s.online) Api.sendShutdown(context, s.id) else Api.sendWol(context, s.id)
+            powerBusy = false
             val ok = result.code in 200..299 && parseOk(result.body)
             snackbar.showSnackbar(
-                if (ok) "Shutdown command sent to ${s.name}" else "Shutdown failed: ${result.body}"
+                when {
+                    s.online && ok -> "Shutdown command sent to ${s.name}"
+                    s.online -> "Shutdown failed: ${result.body}"
+                    ok -> "Wake packet sent to ${s.name}"
+                    else -> "WOL failed: ${result.body}"
+                }
             )
         }
     }
@@ -170,7 +170,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     if (editing) {
         EditServerScreen(
             server = status?.let {
-                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath)
+                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath, it.sshPassword)
             },
             isNew = false,
             onBack = {
@@ -244,17 +244,14 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                                 color = if (s.online) OnlineGreen else OfflineRed,
                             )
                             Spacer(Modifier.weight(1f))
-                            WakeButton(
-                                enabled = s.mac.isNotEmpty() && !wolBusy,
-                                busy = wolBusy,
+                            // The single power toggle: wake when offline,
+                            // power off when online — dimmed for the
+                            // unavailable direction, like on the dashboard.
+                            PowerButton(
+                                enabled = (if (s.online) s.sshConfigured() else s.mac.isNotEmpty()) && !powerBusy,
+                                busy = powerBusy,
                                 online = s.online,
-                                onClick = { wakeConfirm = true },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            ShutdownButton(
-                                enabled = s.sshConfigured() && !shutdownBusy,
-                                busy = shutdownBusy,
-                                onClick = { shutdownConfirm = true },
+                                onClick = { powerConfirm = true },
                             )
                         }
                         Text(
@@ -286,7 +283,15 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                         DetailRow("Check", if (s.check == "ping") "ping (ICMP)" else "TCP :${s.port}")
                         DetailRow(
                             "SSH",
-                            if (s.sshConfigured()) "as ${s.sshUser} (key ${s.sshKeyPath})" else "not set (shutdown off)",
+                            if (s.sshConfigured()) {
+                                val creds = buildList {
+                                    if (s.sshKeyPath.isNotEmpty()) add("key ${s.sshKeyPath}")
+                                    if (s.sshPassword.isNotEmpty()) add("password")
+                                }.joinToString(" + ")
+                                "as ${s.sshUser} ($creds)"
+                            } else {
+                                "not set (power off off)"
+                            },
                         )
                         OutlinedButton(onClick = { editing = true }) {
                             Text("Edit settings")
@@ -301,66 +306,42 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
-    // Wake confirmation dialog.
-    val confirmTarget = if (wakeConfirm) status else null
+    // Power-action confirmation dialog. The action follows the server's
+    // current state: online → power off over SSH, offline → send a wake
+    // packet; the confirm button is enabled only for the available
+    // direction (SSH configured / MAC set).
+    val confirmTarget = if (powerConfirm) status else null
     confirmTarget?.let { s ->
         AlertDialog(
-            onDismissRequest = { wakeConfirm = false },
-            title = { Text("Wake ${s.name}?") },
+            onDismissRequest = { powerConfirm = false },
+            title = { Text(if (s.online) "Power off ${s.name}?" else "Send wake to ${s.name}?") },
             text = {
                 Text(
-                    if (s.mac.isNotEmpty()) {
-                        "A Wake-on-LAN packet will be sent to ${s.mac} (${s.ip})."
-                    } else {
-                        "This server has no MAC address configured, so WOL cannot be sent."
+                    when {
+                        s.online && s.sshConfigured() ->
+                            "A clean shutdown (systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
+                        s.online ->
+                            "This server has no SSH power-off configured (SSH user plus a key path and/or password), so it cannot be powered off from the app."
+                        s.mac.isNotEmpty() ->
+                            "A Wake-on-LAN packet will be sent to ${s.mac} (${s.ip})."
+                        else ->
+                            "This server has no MAC address configured, so WOL cannot be sent."
                     }
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        wakeConfirm = false
-                        sendWol()
+                        powerConfirm = false
+                        sendPower()
                     },
-                    enabled = s.mac.isNotEmpty() && !wolBusy,
+                    enabled = (if (s.online) s.sshConfigured() else s.mac.isNotEmpty()) && !powerBusy,
                 ) {
-                    Text("Wake")
+                    Text(if (s.online) "Power off" else "Power on", color = if (s.online) OfflineRed else Color.Unspecified)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { wakeConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    // Shutdown confirmation dialog.
-    val shutdownTarget = if (shutdownConfirm) status else null
-    shutdownTarget?.let { s ->
-        AlertDialog(
-            onDismissRequest = { shutdownConfirm = false },
-            title = { Text("Shutdown ${s.name}?") },
-            text = {
-                Text(
-                    if (s.sshConfigured()) {
-                        "A clean shutdown (systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
-                    } else {
-                        "This server has no SSH shutdown configured (SSH user + key path), so it cannot be shut down from the app."
-                    }
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        shutdownConfirm = false
-                        sendShutdown()
-                    },
-                    enabled = s.sshConfigured() && !shutdownBusy,
-                ) {
-                    Text("Shutdown", color = OfflineRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { shutdownConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { powerConfirm = false }) { Text("Cancel") }
             },
         )
     }

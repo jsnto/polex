@@ -5,8 +5,9 @@ Home-lab server status + Wake-on-LAN, from your phone.
 - **Backend** (Go + Gin): keeps a configurable list of servers, checks each
   one on an interval (a TCP port connect, or an ICMP ping, per server),
   exposes status over REST, sends Wake-on-LAN "magic packets" on demand, and
-  can power a server off cleanly over SSH (`systemctl poweroff`, key auth —
-  per-server opt-in via `sshUser` + `sshKeyPath`).
+  can power a server off cleanly over SSH (`systemctl poweroff`, key auth
+  with an optional password fallback — per-server opt-in via `sshUser` plus
+  `sshKeyPath` and/or `sshPassword`).
 - **Android app** (Kotlin, Jetpack Compose):
   - **login screen** — signs in via `POST /api/login` and stores the
     returned bearer token; every API call sends it, and a 401 from the
@@ -15,11 +16,14 @@ Home-lab server status + Wake-on-LAN, from your phone.
     requests a longer-lived token (30 days, `POLEX_REMEMBER_TTL`);
   - dashboard that auto-refreshes (and refreshes when pulled down) and shows
     each server's status (online dot,
-    latency, last wake time) with a **Wake** power button per server (the
-    stroke-style power symbol — open circle with a vertical line — tinted
-    by status: green when online, red when offline) and a **Shutdown**
-    button next to it (dimmed when the server has no SSH shutdown
-    configured), both asking for confirmation in a dialog; tapping a
+    latency, last wake time) with a single **power** button per server (the
+    stroke-style power symbol — open circle with a vertical line — tinted by
+    status: green when online, red when offline). The button is a toggle
+    driven by the server's current state: **online → power off** (a clean
+    `systemctl poweroff` over SSH; dimmed when the server has no SSH power-off
+    configured) and **offline → power on** (a Wake-on-LAN magic packet; dimmed
+    when no MAC is configured) — each direction asks for confirmation in a
+    dialog ("Power off <server>?" / "Send wake to <server>?"); tapping a
     server opens a detail page with its live status and editable settings;
   - settings screen to configure the backend URL and add/remove/reorder
     servers (name, IP, MAC, check port, and the check method — TCP or ping).
@@ -126,13 +130,13 @@ unauthenticated calls get `401`.
 | POST   | `/api/login`        | `{username, password, remember?}` → `{ok, token}` |
 | GET    | `/api/health`       | liveness (public)                                      |
 | GET    | `/api/servers`      | configured servers                                     |
-| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?}` |
+| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?}` |
 | POST   | `/api/servers/reorder` | set display order `{order: [id, ...]}`          |
 | PUT    | `/api/servers/:id`  | update server                                          |
 | DELETE | `/api/servers/:id`  | remove server                                          |
-| GET    | `/api/status`       | live status: `{id,name,ip,mac,port,check,sshUser,sshKeyPath,online,latencyMs,lastChecked,lastWolAt,lastShutdownAt}` |
-| POST   | `/api/servers/:id/wol` | send Wake-on-LAN packet to the server's MAC       |
-| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`systemctl poweroff`, key auth) |
+| GET    | `/api/status`       | live status: `{id,name,ip,mac,port,check,sshUser,sshKeyPath,sshPassword,online,latencyMs,lastChecked,lastWolAt,lastShutdownAt}` |
+| POST   | `/api/servers/:id/wol` | send Wake-on-LAN packet to the server's MAC (the power button's **offline** direction) |
+| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`systemctl poweroff`, key then password auth) (the power button's **online** direction) |
 | GET    | `/api/version`        | backend version `{"version":"…"}` (constant `Version` in `backend/version.go`) |
 
 WOL packets are sent via UDP to `255.255.255.255:9` **and** to the /24 subnet
@@ -143,16 +147,23 @@ broadcast of the server's IP (e.g. `192.168.1.255:9`), plus any addresses in
 > (VLAN/broadcast domain) as the target machine, and the target's NIC/BIOS
 > must have Wake-on-LAN enabled.
 
-### SSH shutdown
+### Power off over SSH
 
-Servers with **both** `sshUser` and `sshKeyPath` set can be shut down
-cleanly from the app (`POST /api/servers/:id/shutdown` runs
-`systemctl poweroff` over SSH, key auth; the app's **Shutdown** button is
-dimmed for servers without this config, exactly like Wake is without a
-MAC). The private key is a **file on the backend host** — the config holds
-only its path (`sshKeyPath`, `~/...` expanded); under Docker, mount the key
-dir into the container (see `backend/docker-compose.yml`). Key auth only —
-no password auth. Honest limits:
+Servers with `sshUser` set plus at least one credential — `sshKeyPath` and/or
+`sshPassword` — can be powered off cleanly from the app (the power button's
+**online** direction: `POST /api/servers/:id/shutdown` runs `systemctl
+poweroff` over SSH). Credentials are tried in order, key first: the key is
+offered, and if sshd rejects it (an authentication failure) the password is
+offered next within the same handshake; with no key path the password is used
+directly. A non-auth failure (unreachable, OS not responsive) never burns the
+password fallback — the fallback is for authentication failures only. The
+power button is dimmed for the power-off direction when the server has no SSH
+config, exactly like Wake is without a MAC. The private key is a **file on
+the backend host** — the config holds only its path (`sshKeyPath`, `~/...`
+expanded); under Docker, mount the key dir into the container (see
+`backend/docker-compose.yml`). The password is stored in the same per-server
+config blob (bearer-token-protected home-lab config — no extra secret store).
+Honest limits:
 
 - **In-band only:** the shutdown works only while the target's OS and sshd
   are responsive. If the server is wedged or unreachable the endpoint
@@ -219,19 +230,22 @@ adb install android/apk/polex-debug.apk
    The URL can also be changed later in **Settings → Backend**.
 3. Add your servers in **Settings → Servers** (name, IP, MAC, check port);
    each can be edited or deleted from the same screen. The MAC is what the
-   Wake button uses; leave it empty to list a server without WOL. Toggle
+   power button uses to wake the server (when it is offline); leave it empty
+   to list a server without WOL. Toggle
    **Use ping (ICMP)** to check a server with an ICMP echo instead of a TCP
    port connect (the check port is then ignored) — handy for devices that
-   don't expose a known open port. The **SSH user** / **SSH key path**
-   fields (both optional) enable the clean-shutdown button: set both, with a
-   key file on the machine running the backend, and the server's **Shutdown**
-   button appears active. Drag the ⋮ handle to **reorder** the list
+   don't expose a known open port. The **SSH user** / **SSH key path** /
+   **SSH password** fields (all optional) let you power the server off over
+   SSH: set the user plus a key path and/or a password, with a key file on
+   the machine running the backend (the key is tried first; a rejected key
+   falls back to the password), and the server's **power** button is active
+   for the power-off direction. Drag the ⋮ handle to **reorder** the list
    (persisted via `POST /api/servers/reorder`).
 4. On the dashboard, **tap a server** to open its detail page: live status
    (online/latency/last checked/last wake/last shutdown), the configured
-   settings (incl. the SSH user/key), and the same **Wake** (power icon,
-   green = online, red = offline) and **Shutdown** buttons; system back
-   returns to the dashboard.
+   settings (incl. the SSH user/key), and the same single **power** button
+   (stroke power icon, green = online, red = offline; online → power off
+   over SSH, offline → wake); system back returns to the dashboard.
 
 ### Widget
 
@@ -254,5 +268,6 @@ can defer WorkManager's periodic work) and on every app status refresh
      ▼                              ▼
  Android app ◀─GET /api/status────  backend ──UDP magic packet──▶  server NIC
         (config POST/PUT/DELETE /api/servers, reorder POST /api/servers/reorder,
-         wake POST /api/servers/:id/wol, shutdown POST /api/servers/:id/shutdown)
+         power toggle: wake POST /api/servers/:id/wol (offline),
+         power off POST /api/servers/:id/shutdown (online, SSH))
 ```

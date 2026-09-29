@@ -3,7 +3,8 @@
 Go + Gin REST API. Keeps a configurable list of servers, health-checks them
 on an interval (a TCP port connect, or an ICMP ping, per server), and sends
 Wake-on-LAN magic packets on demand. Servers with optional SSH config can
-also be powered off cleanly (`systemctl poweroff` over SSH, key auth).
+also be powered off cleanly (`systemctl poweroff` over SSH, key auth with an
+optional password fallback).
 
 > Agent/handler documentation: see [`AGENTS.md`](AGENTS.md).
 
@@ -53,13 +54,13 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | GET    | `/api/health`          | no   | liveness                           |
 | POST   | `/api/login`           | no   | `{username, password, remember?}` → `{ok, token}` (401 on bad creds); `remember: true` grants a token with the `POLEX_REMEMBER_TTL` lifetime |
 | GET    | `/api/servers`         | yes  | configured servers                 |
-| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?}` |
+| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?}` |
 | POST   | `/api/servers/reorder` | yes  | set order `{order: [id, ...]}`        |
 | PUT    | `/api/servers/:id`     | yes  | update server                      |
 | DELETE | `/api/servers/:id`     | yes  | remove server                      |
 | GET    | `/api/status`          | yes  | live status of all servers         |
 | POST   | `/api/servers/:id/wol` | yes  | send Wake-on-LAN packet            |
-| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (`systemctl poweroff`), see below |
+| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (`systemctl poweroff`, key then password auth), see below |
 | GET    | `/api/version`         | yes  | backend version `{"version":"…"}` (constant `Version` in `version.go`) |
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
@@ -80,6 +81,7 @@ after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.
     "check": "tcp",
     "sshUser": "root",
     "sshKeyPath": "/app/keys/polex",
+    "sshPassword": "",
     "online": true,
     "latencyMs": 3,
     "lastChecked": "2026-09-09T01:27:07Z",
@@ -114,32 +116,45 @@ Each server is checked every `CHECK_INTERVAL`. The method is per-server:
 If `ping` isn't on `PATH`, ping-based servers report offline and the backend
 logs a warning.
 
-## SSH shutdown
+## Power off over SSH
 
-A server with **both** `sshUser` and `sshKeyPath` set gets a **Shutdown**
-action: `POST /api/servers/:id/shutdown` connects to `ip:22` with that user
-and the private key, and runs `systemctl poweroff`. Both fields empty =
-shutdown disabled (exactly like an empty MAC disabling WOL); exactly one set
-is rejected by validation. Key auth only — there is no password-auth path.
+A server with `sshUser` set plus at least one credential (`sshKeyPath`
+and/or `sshPassword`) gets a power-off action: `POST /api/servers/:id/shutdown`
+connects to `ip:22` with that user and runs `systemctl poweroff`.
+Credentials are tried in order, key first: if the key path is set the key is
+offered, and if sshd rejects it (an authentication failure) the password is
+offered next within the same handshake; with no key path the password is used
+directly. All-empty = power-off disabled (exactly like an empty MAC disabling
+WOL); any incomplete subset (a user with no credential, or credentials
+without a user) is rejected by validation. No extra secret store — the
+password lives in the same per-server config blob as the other fields
+(bearer-token-protected home-lab config):
 
 - **The private key is a file on the backend host.** The config blob
   (`data.json`) holds only the *path* (`sshKeyPath`), never key material.
   A leading `~/` is expanded to the backend's home dir. Under Docker, mount
-  the key (e.g. `./ssh:/app/ssh:ro`) and use the in-container path
+  the key (e.g. `./ssh:/app/ssh:ro`) and use the the in-container path
   (`/app/ssh/id_ed25519`) — see `docker-compose.yml`.
+- **Fallback rules:** the password fallback is for *authentication
+  failures only*. A key attempt that fails for a non-auth reason (timeout,
+  unreachable, OS not responsive — the endpoint reports
+  `ok: false, "server unreachable or OS not responsive: ..."`) does not
+  consume the password, and a missing/invalid key *file* is a local config
+  error (its own distinct message), also not a fallback trigger. The
+  `"ssh authentication failed ..."` message is reported only after every
+  configured credential (key, then password when set) was tried.
 - **In-band limit (the wedge case):** this works only while the target's OS
   and sshd are responsive. If the server is wedged or unreachable the
-  command cannot run, and the endpoint says so:
-  `ok: false, "server unreachable or OS not responsive: ..."`. Out-of-band
-  mechanisms (BMC, smart plug) are the fallback for that case and are not
-  implemented here.
+  command cannot run, and the endpoint says so. Out-of-band mechanisms
+  (BMC, smart plug) are the fallback for that case and are not implemented
+  here.
 - **Success semantics:** `systemctl poweroff` returns as soon as systemd
   enqueues the job, so the response ("shutdown command accepted") arrives
   before the machine is actually off. A connection that dies right after the
   command was accepted is treated as success (the host is powering off and
-  tears down the SSH session). One 4.5 s total deadline bounds the whole
-  SSH sequence (dial, handshake, session start, exit-status wait), well
-  inside the app's 5 s read timeout.
+  tears down the SSH session). One 4.5 s total deadline bounds the WHOLE SSH
+  sequence (dial, handshake with every credential attempt, session start,
+  exit-status wait), well inside the app's 5 s read timeout.
 - **Self-shutdown:** if the backend host is itself one of the servers, the
   response may never arrive — the backend powers off mid-request. That is
   expected: the command was accepted. `lastShutdownAt` is best-effort here:
@@ -215,7 +230,7 @@ curl -s -X POST localhost:8080/api/servers \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"nas","ip":"192.168.1.10","mac":"aa:bb:cc:dd:ee:01","port":22}'
 curl -s -X POST localhost:8080/api/servers/1/wol -H "Authorization: Bearer $TOKEN"
-# clean SSH shutdown (server 1 needs sshUser + sshKeyPath set, key file
-# present on the backend host):
+# clean SSH shutdown (server 1 needs sshUser plus a key path and/or password;
+# if a key path is set, the key file must be present on the backend host):
 curl -s -X POST localhost:8080/api/servers/1/shutdown -H "Authorization: Bearer $TOKEN"
 ```
