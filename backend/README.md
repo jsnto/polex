@@ -137,8 +137,9 @@ is rejected by validation. Key auth only — there is no password-auth path.
   enqueues the job, so the response ("shutdown command accepted") arrives
   before the machine is actually off. A connection that dies right after the
   command was accepted is treated as success (the host is powering off and
-  tears down the SSH session). Connect/handshake timeout is 3 s (the class
-  of the health checks).
+  tears down the SSH session). One 4.5 s total deadline bounds the whole
+  SSH sequence (dial, handshake, session start, exit-status wait), well
+  inside the app's 5 s read timeout.
 - **Self-shutdown:** if the backend host is itself one of the servers, the
   response may never arrive — the backend powers off mid-request. That is
   expected: the command was accepted. `lastShutdownAt` is best-effort here:

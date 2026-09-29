@@ -513,8 +513,10 @@ func (s *state) shutdown(c *gin.Context) {
 	s.mu.RLock()
 	sv := s.find(id)
 	var user, keyPath, ip string
+	configured := false
 	if sv != nil {
 		user, keyPath, ip = sv.SshUser, sv.SshKeyPath, sv.IP
+		configured = sv.sshConfigured()
 	}
 	s.mu.RUnlock()
 
@@ -522,7 +524,7 @@ func (s *state) shutdown(c *gin.Context) {
 		c.JSON(404, gin.H{"ok": false, "message": "server not found"})
 		return
 	}
-	if user == "" || keyPath == "" {
+	if !configured {
 		c.JSON(400, gin.H{"ok": false, "message": "no ssh shutdown configured for this server"})
 		return
 	}

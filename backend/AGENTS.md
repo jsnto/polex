@@ -156,10 +156,13 @@ in-memory only (cleared on backend restart).
 - SSH shutdown (`shutdown.go`) is per-server opt-in: `sshConfigured()` needs
   BOTH `sshUser` and `sshKeyPath` set (like an empty MAC disabling WOL);
   `normalize()` rejects a half-set pair. `sshPoweroff` dials `ip:22`
-  (`sshPort` var; 3 s timeout, key auth via `x/crypto/ssh`) and runs
+  (`sshPort` var; one 4.5 s total deadline over dial, handshake, session
+  start, and the exit-status wait — under the app's 5 s read timeout, key
+  auth via `x/crypto/ssh`) and runs
   `systemctl poweroff`; it treats a connection that dies after sshd accepted
   the command as success (the host is powering off), a non-zero exit as
-  failure (remote stderr in the message), and dial/handshake failure as
+  failure (remote stderr in the message), and dial/handshake/session-start
+  timeout or failure as
   "server unreachable or OS not responsive" (the wedge-case limit — in-band
   only). The key is a file on the backend host; `data.json` holds only the
   path. Host-key checking is off (`ssh.InsecureIgnoreHostKey`), matching the

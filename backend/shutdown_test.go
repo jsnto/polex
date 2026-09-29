@@ -126,11 +126,15 @@ func genTestKey(t *testing.T, dir string) string {
 // fakeSSHServer starts an in-process SSH server on 127.0.0.1 that accepts
 // any key and answers the `systemctl poweroff` exec request per mode:
 //
-//	"ok"   — exit status 0 (clean acceptance)
-//	"fail" — stderr + exit status 127
-//	"drop" — accept the exec request, then drop the TCP connection
-//	         (simulates the host powering off mid-session)
+//	"ok"       — exit status 0 (clean acceptance)
+//	"fail"     — stderr + exit status 127
+//	"drop"     — accept the exec request, then drop the TCP connection
+//	             (simulates the host powering off mid-session)
 //	"authfail" — reject the key during authentication
+//	"hang"     — handshake completes, then the channel-open request is
+//	             never answered (half-wedged host)
+//	"stall"    — accept the exec request, then neither the exit status
+//	             nor the connection ever comes back (slow host)
 func fakeSSHServer(t *testing.T, mode string) int {
 	t.Helper()
 	_, hostPriv, err := ed25519.GenerateKey(rand.Reader)
@@ -171,6 +175,13 @@ func fakeSSHServer(t *testing.T, mode string) int {
 				}
 				defer sc.Close()
 				go ssh.DiscardRequests(reqs)
+				if mode == "hang" {
+					// Half-wedged host: never answer the channel-open
+					// request.
+					for range chans {
+					}
+					return
+				}
 				for newCh := range chans {
 					if newCh.ChannelType() != "session" {
 						_ = newCh.Reject(ssh.UnknownChannelType, "only session")
@@ -188,15 +199,22 @@ func fakeSSHServer(t *testing.T, mode string) int {
 						if req.Type != "exec" {
 							continue
 						}
-						if mode == "fail" {
+						switch mode {
+						case "fail":
 							_, _ = ch.Stderr().Write([]byte("sh: systemctl: not found\n"))
 							_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct {
 								Status uint32
 							}{127}))
-						} else if mode != "drop" {
+						case "ok":
 							_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct {
 								Status uint32
 							}{0}))
+						}
+						if mode == "stall" {
+							// The exit status never comes; hold the
+							// connection open until the client's deadline
+							// ends the wait.
+							select {}
 						}
 						_ = ch.Close()
 						if mode == "drop" {
@@ -483,5 +501,70 @@ func TestShutdownHandlerGating(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d (body %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestShutdownHandlerHalfWedgedHost(t *testing.T) {
+	// The handshake completes but the channel-open request is never
+	// answered: the handler must still answer with an honest error,
+	// inside the total deadline.
+	keyFile := genTestKey(t, t.TempDir())
+	port := fakeSSHServer(t, "hang")
+	oldPort := sshPort
+	sshPort = port
+	defer func() { sshPort = oldPort }()
+	oldTotal := sshTotalTimeout
+	sshTotalTimeout = 500 * time.Millisecond
+	defer func() { sshTotalTimeout = oldTotal }()
+
+	srv := Server{ID: 1, Name: "NAS", IP: "127.0.0.1", Port: 22, Check: "tcp",
+		SshUser: "root", SshKeyPath: keyFile}
+	r, _ := newTestBackend(t, srv)
+
+	start := time.Now()
+	w := doShutdown(t, r)
+	if elapsed := time.Since(start); elapsed > sshTotalTimeout+time.Second {
+		t.Fatalf("handler took %v: total deadline not enforced", elapsed)
+	}
+	var resp shutdownResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if resp.OK {
+		t.Fatalf("ok = true for a half-wedged host (body %s)", w.Body.String())
+	}
+	if !strings.Contains(resp.Message, "unreachable or OS not responsive") {
+		t.Fatalf("message = %q", resp.Message)
+	}
+}
+
+func TestShutdownHandlerSlowConfirm(t *testing.T) {
+	// The exec is accepted but the exit status never arrives (slow
+	// systemd): still a success, and the wait must stay inside the total
+	// deadline.
+	keyFile := genTestKey(t, t.TempDir())
+	port := fakeSSHServer(t, "stall")
+	oldPort := sshPort
+	sshPort = port
+	defer func() { sshPort = oldPort }()
+	oldTotal := sshTotalTimeout
+	sshTotalTimeout = 500 * time.Millisecond
+	defer func() { sshTotalTimeout = oldTotal }()
+
+	srv := Server{ID: 1, Name: "NAS", IP: "127.0.0.1", Port: 22, Check: "tcp",
+		SshUser: "root", SshKeyPath: keyFile}
+	r, _ := newTestBackend(t, srv)
+
+	start := time.Now()
+	w := doShutdown(t, r)
+	if elapsed := time.Since(start); elapsed > sshTotalTimeout+time.Second {
+		t.Fatalf("handler took %v: total deadline not enforced", elapsed)
+	}
+	var resp shutdownResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if !resp.OK || !strings.Contains(resp.Message, "did not confirm") {
+		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
 	}
 }

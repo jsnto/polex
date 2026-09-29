@@ -30,16 +30,11 @@ import (
 
 const shutdownCommand = "systemctl poweroff"
 
-const (
-	// sshDialTimeout bounds the TCP connect + SSH handshake, in the class
-	// of the 3 s TCP health checks.
-	sshDialTimeout = 3 * time.Second
-	// sshConfirmTimeout bounds how long we wait for the remote command's
-	// exit status after sshd accepted it. `systemctl poweroff` exits as
-	// soon as systemd enqueues the job, so this is a safety net, not the
-	// normal path.
-	sshConfirmTimeout = 4 * time.Second
-)
+// sshTotalTimeout is the one deadline for the whole shutdown SSH sequence
+// (dial, handshake, session start, exec wait): it stays under the app's
+// 5 s OkHttp read timeout so the backend always answers first. A var so
+// tests can shrink it.
+var sshTotalTimeout = 4500 * time.Millisecond
 
 // sshPort is the port shutdown connections use (sshd by convention). A
 // var so tests can point it at an in-process SSH server.
@@ -91,14 +86,26 @@ func sshPoweroff(addr, user, keyPath string) (string, error) {
 		return "", fmt.Errorf("invalid ssh key at %s: %v", keyPath, err)
 	}
 
+	// One total deadline for the whole sequence. x/crypto/ssh's dial
+	// timeout only bounds the TCP connect, so the handshake is bounded by
+	// a deadline on the conn itself, and the session start and exec wait
+	// race the same deadline.
+	deadline := time.Now().Add(sshTotalTimeout)
+
 	cfg := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // trusted LAN; see above
-		Timeout:         sshDialTimeout,
 	}
-	client, err := ssh.Dial("tcp", addr, cfg)
+	conn, err := net.DialTimeout("tcp", addr, time.Until(deadline))
 	if err != nil {
+		return "", fmt.Errorf("server unreachable or OS not responsive: %v", err)
+	}
+	_ = conn.SetDeadline(deadline)
+	cc, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	_ = conn.SetDeadline(time.Time{})
+	if err != nil {
+		conn.Close()
 		// x/crypto/ssh has no exported auth-failure type; its handshake
 		// error text is the discriminator (client_auth.go).
 		if strings.Contains(err.Error(), "unable to authenticate") {
@@ -106,18 +113,44 @@ func sshPoweroff(addr, user, keyPath string) (string, error) {
 		}
 		return "", fmt.Errorf("server unreachable or OS not responsive: %v", err)
 	}
+	client := ssh.NewClient(cc, chans, reqs)
 	defer client.Close()
 
-	sess, err := client.NewSession()
-	if err != nil {
-		return "", fmt.Errorf("ssh session: %v", err)
+	// A half-wedged host can finish the handshake and then never answer
+	// the channel-open or exec request, so the session start races the
+	// same deadline.
+	var stderr strings.Builder // remote stderr, for honest failure messages
+	type sessionStart struct {
+		sess *ssh.Session
+		err  error
+	}
+	started := make(chan sessionStart, 1)
+	go func() {
+		sess, err := client.NewSession()
+		if err != nil {
+			started <- sessionStart{err: fmt.Errorf("ssh session: %v", err)}
+			return
+		}
+		sess.Stderr = &stderr
+		if err := sess.Start(shutdownCommand); err != nil {
+			sess.Close()
+			started <- sessionStart{err: fmt.Errorf("server refused the poweroff command: %v", err)}
+			return
+		}
+		started <- sessionStart{sess: sess}
+	}()
+	var sess *ssh.Session
+	select {
+	case res := <-started:
+		if res.err != nil {
+			return "", res.err
+		}
+		sess = res.sess
+	case <-time.After(time.Until(deadline)):
+		client.Close()
+		return "", fmt.Errorf("server unreachable or OS not responsive: session start timed out")
 	}
 	defer sess.Close()
-	var stderr strings.Builder // remote stderr, for honest failure messages
-	sess.Stderr = &stderr
-	if err := sess.Start(shutdownCommand); err != nil {
-		return "", fmt.Errorf("server refused the poweroff command: %v", err)
-	}
 
 	// Wait briefly for the exit status. Outcomes:
 	//   nil            — systemctl exited 0: the poweroff job is enqueued.
@@ -142,7 +175,7 @@ func sshPoweroff(addr, user, keyPath string) (string, error) {
 		default:
 			return "shutdown command accepted (connection closed as the server powered off)", nil
 		}
-	case <-time.After(sshConfirmTimeout):
+	case <-time.After(time.Until(deadline)):
 		return "shutdown command accepted; server did not confirm (timed out)", nil
 	}
 }
