@@ -53,7 +53,7 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | GET    | `/api/health`          | no   | liveness                           |
 | POST   | `/api/login`           | no   | `{username, password, remember?}` → `{ok, token}` (401 on bad creds); `remember: true` grants a token with the `POLEX_REMEMBER_TTL` lifetime |
 | GET    | `/api/servers`         | yes  | configured servers                 |
-| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?}` |
+| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?}` |
 | POST   | `/api/servers/reorder` | yes  | set order `{order: [id, ...]}`        |
 | PUT    | `/api/servers/:id`     | yes  | update server                      |
 | DELETE | `/api/servers/:id`     | yes  | remove server                      |

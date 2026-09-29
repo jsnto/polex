@@ -23,9 +23,9 @@ type Server struct {
 	ID         int    `json:"id"`
 	Name       string `json:"name"`
 	IP         string `json:"ip"`
-	MAC        string `json:"mac"`   // empty = WOL disabled
-	Port       int    `json:"port"`  // TCP check port (ignored when Check == "ping")
-	Check      string `json:"check"` // "tcp" (default) or "ping"
+	MAC        string `json:"mac"`        // empty = WOL disabled
+	Port       int    `json:"port"`       // TCP check port (ignored when Check == "ping")
+	Check      string `json:"check"`      // "tcp" (default) or "ping"
 	SshUser    string `json:"sshUser"`    // + SshKeyPath: SSH shutdown (both set = enabled)
 	SshKeyPath string `json:"sshKeyPath"` // path to the private key on the backend host
 }

@@ -126,7 +126,7 @@ unauthenticated calls get `401`.
 | POST   | `/api/login`        | `{username, password, remember?}` → `{ok, token}` |
 | GET    | `/api/health`       | liveness (public)                                      |
 | GET    | `/api/servers`      | configured servers                                     |
-| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?}`          |
+| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?}` |
 | POST   | `/api/servers/reorder` | set display order `{order: [id, ...]}`          |
 | PUT    | `/api/servers/:id`  | update server                                          |
 | DELETE | `/api/servers/:id`  | remove server                                          |
@@ -228,9 +228,10 @@ adb install android/apk/polex-debug.apk
    button appears active. Drag the ⋮ handle to **reorder** the list
    (persisted via `POST /api/servers/reorder`).
 4. On the dashboard, **tap a server** to open its detail page: live status
-   (online/latency/last checked/last wake), the configured settings, and the
-   same power-icon **Wake** button (green = online, red = offline; system
-   back returns to the dashboard).
+   (online/latency/last checked/last wake/last shutdown), the configured
+   settings (incl. the SSH user/key), and the same **Wake** (power icon,
+   green = online, red = offline) and **Shutdown** buttons; system back
+   returns to the dashboard.
 
 ### Widget
 
