@@ -497,9 +497,10 @@ func (s *state) sendWol(c *gin.Context) {
 
 // shutdown runs a clean `systemctl poweroff` on the server over SSH (the
 // sendWol shape: look up, validate configured, run, record, respond).
-// The attempt is recorded either way — like lastWolAt, lastShutdownAt
-// marks when the action was last attempted, which the next boot's status
-// still shows (the self-shutdown case: the backend may die mid-request).
+// lastShutdownAt is best-effort: it is written after sshPoweroff returns,
+// in-memory only (cleared on restart, like lastWolAt), and in the
+// self-shutdown case the host dies mid-run so the record is often never
+// written at all.
 // Returns 200 with ok:false on run failures (unreachable, auth, command
 // failure) so the app can report the message; 400/404 for config/lookup
 // errors, like sendWol.

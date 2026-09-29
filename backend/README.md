@@ -141,9 +141,9 @@ is rejected by validation. Key auth only — there is no password-auth path.
   of the health checks).
 - **Self-shutdown:** if the backend host is itself one of the servers, the
   response may never arrive — the backend powers off mid-request. That is
-  expected: the command was accepted, and the next boot's status still shows
-  `lastShutdownAt` (it is recorded before the run; the in-memory record
-  resets on restart, like `lastWolAt`).
+  expected: the command was accepted. `lastShutdownAt` is best-effort here:
+  it is written after the run returns and is in-memory only (cleared on
+  restart, like `lastWolAt`), so the record is often never written at all.
 - **Trust note:** host-key checking is intentionally off
   (`ssh.InsecureIgnoreHostKey`) — the backend sits on a trusted LAN behind
   bearer-token auth, matching polex's plain-HTTP posture. A leaked token can

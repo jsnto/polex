@@ -161,8 +161,10 @@ no password auth. Honest limits:
   path for that case.
 - **Self-shutdown:** if the backend host is itself one of the servers,
   "command accepted; backend unreachable" is *expected* — the backend powers
-  off mid-request and the app's disconnected/retry page appears. The next
-  boot's status still shows `lastShutdownAt`.
+  off mid-request and the app's disconnected/retry page appears. The
+  `lastShutdownAt` record is best-effort here: written after the run
+  returns, in-memory only (cleared on restart), so it is often never
+  written at all.
 
 ### Quick test
 
