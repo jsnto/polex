@@ -44,9 +44,12 @@ the backend runs with `admin`/`polex` and logs a loud `WARN` — never ship that
 - `env.go` — minimal `.env` loader (`loadDotEnv`).
 - `wol.go` — `buildWoLPacket`, `validMac`, `subnetBroadcast24`, `sendWoL`.
 - `shutdown.go` — SSH clean shutdown: `sshPoweroff` (x/crypto/ssh client,
-  key auth, `systemctl poweroff`), `sshConfigured`, `expandHome`,
-  `shutdownTarget`, the `sshPort` var (tests point it at an in-process
-  SSH server).
+  key then password auth — `sshAuthMethods` orders the credentials, key
+  first, and a key rejected by sshd, or whose file fails to load, falls
+  through to the password when one is set (the key error stays visible in
+  the result); `systemctl poweroff`), `sshConfigured` (user + at
+  least one credential), `expandHome`, `shutdownTarget`, the `sshPort` var
+  (tests point it at an in-process SSH server).
 - `version.go` — backend version constant (`Version`, keep in sync with the
   app's `versionName`) and the `GET /api/version` handler.
 - `data.json` — runtime config (gitignored), used by a plain `./polex-backend`
@@ -126,9 +129,9 @@ login).
 | DELETE | `/api/servers/:id`   | removes from list, status cache, and disk      |
 | GET    | `/api/status`        | live status per server                         |
 | POST   | `/api/servers/:id/wol` | sends WOL; returns `{ok, message, lastWolAt}` (200 even on WOL failure — check `ok`) |
-| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`systemctl poweroff`, key auth); 400 when the server has no `sshUser`+`sshKeyPath`; 200 `{ok, message, lastShutdownAt}` (check `ok` — 200 on run failures too) |
+| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`systemctl poweroff`, key then password auth); 400 when the server has no usable SSH config (`sshUser` plus a key path and/or password); 200 `{ok, message, lastShutdownAt}` (check `ok` — 200 on run failures too) |
 
-`GET /api/status` item: `{id, name, ip, mac, port, check, sshUser, sshKeyPath, online, latencyMs, lastChecked, lastWolAt, lastShutdownAt}`.
+`GET /api/status` item: `{id, name, ip, mac, port, check, sshUser, sshKeyPath, sshPassword, online, latencyMs, lastChecked, lastWolAt, lastShutdownAt}`.
 `lastChecked` is `"never"` if the first check hasn't completed.
 `lastWolAt`/`lastShutdownAt` record the last attempt (even failed ones);
 in-memory only (cleared on backend restart).
@@ -154,20 +157,29 @@ in-memory only (cleared on backend restart).
 - WOL is sent to `255.255.255.255:9`, the /24 broadcast of the server IP, and
   any `WOL_BROADCAST` entries; at least one send must succeed for `ok: true`.
 - SSH shutdown (`shutdown.go`) is per-server opt-in: `sshConfigured()` needs
-  BOTH `sshUser` and `sshKeyPath` set (like an empty MAC disabling WOL);
-  `normalize()` rejects a half-set pair. `sshPoweroff` dials `ip:22`
-  (`sshPort` var; one 4.5 s total deadline over dial, handshake, session
-  start, and the exit-status wait — under the app's 5 s read timeout, key
-  auth via `x/crypto/ssh`) and runs
-  `systemctl poweroff`; it treats a connection that dies after sshd accepted
-  the command as success (the host is powering off), a non-zero exit as
-  failure (remote stderr in the message), and dial/handshake/session-start
-  timeout or failure as
+  `sshUser` AND at least one of `sshKeyPath`/`sshPassword` (like an empty MAC
+  disabling WOL); `normalize()` rejects an incomplete subset (a user with no
+  credential, or credentials without a user). `sshPoweroff` dials `ip:22`
+  (`sshPort` var; one 4.5 s total deadline over dial, handshake with every
+  credential attempt, session start, and the exit-status wait — under the
+  app's 5 s read timeout) and runs `systemctl poweroff` with ordered
+  credentials: key first, then the password — the password is offered only
+  after sshd rejected the key (an authentication failure), after the key
+  file failed to load (missing/unreadable/invalid — the key error then
+  stays visible in the result text), or when no key is configured. A
+  non-auth failure (dial timeout, unreachable host, half-wedged sshd) does
+  NOT burn the password fallback; a failed key file with no password set is
+  its own distinct local-config error. It
+  treats a connection that dies after sshd accepted the command as success
+  (the host is powering off), a non-zero exit as failure (remote stderr in
+  the message), and dial/handshake/session-start timeout or failure as
   "server unreachable or OS not responsive" (the wedge-case limit — in-band
-  only). The key is a file on the backend host; `data.json` holds only the
-  path. Host-key checking is off (`ssh.InsecureIgnoreHostKey`), matching the
-  plain-HTTP LAN posture. The attempt is recorded in `lastShutdown` (in-memory,
-  like `lastWol`) and `save()` is called, mirroring `sendWol`.
+  only). The key is a file on the backend host and the password lives in the
+  same per-server config blob; `data.json` holds the path + password, never
+  key material. Host-key checking is off (`ssh.InsecureIgnoreHostKey`),
+  matching the plain-HTTP LAN posture. The attempt is recorded in
+  `lastShutdown` (in-memory, like `lastWol`) and `save()` is called,
+  mirroring `sendWol`.
 - Config persistence: every add/update/delete **and reorder** writes the whole list to
   `data.json` (or `data/data.json` under Docker) via `save()`, which is
   **atomic** (write `data.json.tmp` + rename) so a crash mid-write can't
@@ -189,7 +201,8 @@ curl -s -X POST localhost:8080/api/servers \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"test","ip":"127.0.0.1","mac":"aa:bb:cc:dd:ee:ff","port":8080}'
 curl -s -X POST localhost:8080/api/servers/<id>/wol -H "Authorization: Bearer $TOKEN"
-# clean SSH shutdown (server needs sshUser + sshKeyPath; key file on this host):
+# clean SSH shutdown (server needs sshUser plus a key path and/or password;
+# key file on this host if a key path is set):
 curl -s -X POST localhost:8080/api/servers/<id>/shutdown -H "Authorization: Bearer $TOKEN"
 curl -s -X DELETE localhost:8080/api/servers/<id> -H "Authorization: Bearer $TOKEN"
 # unauthenticated must be 401:

@@ -16,20 +16,22 @@ screen widget.
   refreshes when you **pull the list down** (Material3 `pullToRefresh`);
   each server
   card shows a green/red status dot, IP, check method (TCP port or ping)
-  and latency (or "offline"), last wake/shutdown time, a **Wake** power
-  button (a stroke-style power symbol — open circle with a vertical line,
-  from `res/drawable/ic_power.xml` — tinted by status: green when online,
-  red when offline, dimmed when WOL can't be sent) and a **Shutdown**
-  button (dimmed when the server has no SSH shutdown configured) — each
-  asks for confirmation in a dialog before POSTing
-  `/api/servers/:id/wol` or `/api/servers/:id/shutdown` (a clean
-  `systemctl poweroff` over SSH; the dialog says it only works while the
-  server's OS is responsive). **Tapping a card opens that server's detail
-  page**
+  and latency (or "offline"), last wake/shutdown time, and a single
+  **power** button (a stroke-style power symbol — open circle with a
+  vertical line, from `res/drawable/ic_power.xml` — tinted by status: green
+  when online, red when offline). The button is a toggle driven by the
+  server's current state: **online → power off** (a clean `systemctl
+  poweroff` over SSH, dimmed when the server has no SSH power-off
+  configured) and **offline → power on** (a Wake-on-LAN packet, dimmed when
+  no MAC is configured) — each asks for confirmation in a dialog ("Power off
+  <server>?" / "Send wake to <server>?") before POSTing
+  `/api/servers/:id/shutdown` or `/api/servers/:id/wol` respectively (the
+  shutdown dialog says it only works while the server's OS is responsive).
+  **Tapping a card opens that server's detail page**
   (`ServerDetailScreen`) with live status and its settings.
 - **Server detail** — the page a card links to: live status (online/latency,
   last checked, last wake, last shutdown), the configured settings (IP, MAC,
-  check method, SSH user/key), the same Wake and Shutdown controls, and an
+  check method, SSH user/key/password), the same power toggle, and an
   **Edit settings** button that
   reuses the settings' add/edit form. System back returns to the dashboard
   (or out of the edit form), not out of the app.
@@ -40,9 +42,12 @@ screen widget.
     **drag-and-drop reordering** (drag the ⋮ handle; committed to the
     backend via `POST /api/servers/reorder`). The add/edit screen also has a
     **Use ping (ICMP)** toggle to check a server with ICMP instead of a TCP
-    port connect, and **SSH user** / **SSH key path** fields (both optional)
-    that enable the server's Shutdown button — the key file must exist on
-    the machine running the backend.
+    port connect, and **SSH user** / **SSH key path** / **SSH password**
+    fields (all optional) that enable the server's power-off direction —
+    the user plus a key path and/or a password; the key file (if used) must
+    exist on the machine running the backend and the key is tried first
+    (a rejected key — or a key file that fails to load — falls back to the
+    password when one is set).
 - **Home screen widget** (Glance) — at-a-glance list of all servers
   (dot + name + `12ms`/`off`). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
@@ -106,12 +111,13 @@ produces the APK under `app/build/outputs/apk/`).
    Plain HTTP on the LAN is intentional (`usesCleartextTraffic=true`).
 3. In **Settings → Servers** you can add, edit or delete servers (the + icon
    opens a dedicated screen; the pencil icon edits a server in the same
-   screen); the **MAC** field is what the Wake button uses — leave it empty
-   to list a server without WOL. Toggle **Use ping (ICMP)** to check a
-   server with an ICMP echo instead of a TCP port connect. Set the **SSH
-   user** and **SSH key path** fields (both) to enable the clean-shutdown
-   button; the key is a file on the backend host, and the path is all that
-   gets stored.
+   screen); the **MAC** field is what the power button uses to wake the
+   server (when it is offline) — leave it empty to list a server without
+   WOL. Toggle **Use ping (ICMP)** to check a server with an ICMP echo
+   instead of a TCP port connect. Set the **SSH user** field plus an **SSH
+   key path** and/or an **SSH password** to enable the power-off direction;
+   the key (if used) is a file on the backend host, and the path + password
+   are all that gets stored.
 
 ## Add the widget
 

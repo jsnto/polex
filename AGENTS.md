@@ -12,8 +12,9 @@ PoleX is a home-lab server status + Wake-on-LAN system:
   `/api/login`) require a bearer token from `POST /api/login`; the
   username/password come from `backend/.env`. See `backend/AGENTS.md`.
 - `android/` — Android app (Kotlin, Jetpack Compose, Glance widget).
-  Dashboard with per-server **Wake** button, settings for backend URL and
-  server list, and a home-screen status widget. See `android/AGENTS.md`.
+  Dashboard with a per-server power toggle (wake when offline, SSH
+  power-off when online), settings for backend URL and server list, and a
+  home-screen status widget. See `android/AGENTS.md`.
 - `scripts/` — helper scripts (bash): `start-backend.sh` (Docker or local
   Go), `build-apk.sh` (Docker Compose or local gradle), `test-emulator.sh`
   (smoke-test the APK on a Dockerized Android emulator).

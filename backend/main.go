@@ -20,14 +20,15 @@ import (
 // ---------- models ----------
 
 type Server struct {
-	ID         int    `json:"id"`
-	Name       string `json:"name"`
-	IP         string `json:"ip"`
-	MAC        string `json:"mac"`        // empty = WOL disabled
-	Port       int    `json:"port"`       // TCP check port (ignored when Check == "ping")
-	Check      string `json:"check"`      // "tcp" (default) or "ping"
-	SshUser    string `json:"sshUser"`    // + SshKeyPath: SSH shutdown (both set = enabled)
-	SshKeyPath string `json:"sshKeyPath"` // path to the private key on the backend host
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	IP          string `json:"ip"`
+	MAC         string `json:"mac"`         // empty = WOL disabled
+	Port        int    `json:"port"`        // TCP check port (ignored when Check == "ping")
+	Check       string `json:"check"`       // "tcp" (default) or "ping"
+	SshUser     string `json:"sshUser"`     // + key/password below: SSH power-off (user + ≥1 credential = enabled)
+	SshKeyPath  string `json:"sshKeyPath"`  // path to the private key on the backend host
+	SshPassword string `json:"sshPassword"` // password auth; fallback after a rejected key (or direct when no key)
 }
 
 type StatusView struct {
@@ -39,6 +40,7 @@ type StatusView struct {
 	Check          string `json:"check"`
 	SshUser        string `json:"sshUser"`
 	SshKeyPath     string `json:"sshKeyPath"`
+	SshPassword    string `json:"sshPassword"`
 	Online         bool   `json:"online"`
 	LatencyMs      int64  `json:"latencyMs"`
 	LastChecked    string `json:"lastChecked"`
@@ -235,6 +237,7 @@ func (s *state) setStatus(sv Server, online bool, ms int64, when string) {
 		Check:          sv.Check,
 		SshUser:        sv.SshUser,
 		SshKeyPath:     sv.SshKeyPath,
+		SshPassword:    sv.SshPassword,
 		Online:         online,
 		LatencyMs:      ms,
 		LastChecked:    when,
@@ -259,14 +262,19 @@ func normalize(in *Server) error {
 	in.MAC = strings.ToUpper(strings.TrimSpace(in.MAC))
 	in.SshUser = strings.TrimSpace(in.SshUser)
 	in.SshKeyPath = strings.TrimSpace(in.SshKeyPath)
+	in.SshPassword = strings.TrimSpace(in.SshPassword)
 	in.ID = 0
 	if in.Name == "" || in.IP == "" {
 		return errField("name and ip are required")
 	}
-	// SSH shutdown is an all-or-nothing pair: exactly one of the two set
-	// is always a mistake (key auth needs both; neither = disabled).
-	if (in.SshUser == "") != (in.SshKeyPath == "") {
-		return errField("sshUser and sshKeyPath must both be set (or both left empty)")
+	// SSH power-off is a user plus at least one credential (key path and/or
+	// password); any other subset is a mistake (credentials without a user,
+	// or a user with nothing to authenticate with).
+	if (in.SshUser == "") != (in.SshKeyPath == "" && in.SshPassword == "") {
+		if in.SshUser == "" {
+			return errField("sshUser must be set when sshKeyPath or sshPassword is set")
+		}
+		return errField("sshKeyPath or sshPassword must be set when sshUser is set")
 	}
 	if net.ParseIP(in.IP) == nil {
 		return errField("invalid ip: " + in.IP)
@@ -314,7 +322,7 @@ func (s *state) listStatus(c *gin.Context) {
 	for _, sv := range s.servers {
 		v, ok := s.status[sv.ID]
 		if !ok {
-			v = StatusView{ID: sv.ID, Name: sv.Name, IP: sv.IP, MAC: sv.MAC, Port: sv.Port, Check: sv.Check, SshUser: sv.SshUser, SshKeyPath: sv.SshKeyPath, LastChecked: "never"}
+			v = StatusView{ID: sv.ID, Name: sv.Name, IP: sv.IP, MAC: sv.MAC, Port: sv.Port, Check: sv.Check, SshUser: sv.SshUser, SshKeyPath: sv.SshKeyPath, SshPassword: sv.SshPassword, LastChecked: "never"}
 		}
 		out = append(out, v)
 	}
@@ -512,10 +520,10 @@ func (s *state) shutdown(c *gin.Context) {
 	}
 	s.mu.RLock()
 	sv := s.find(id)
-	var user, keyPath, ip string
+	var user, keyPath, password, ip string
 	configured := false
 	if sv != nil {
-		user, keyPath, ip = sv.SshUser, sv.SshKeyPath, sv.IP
+		user, keyPath, password, ip = sv.SshUser, sv.SshKeyPath, sv.SshPassword, sv.IP
 		configured = sv.sshConfigured()
 	}
 	s.mu.RUnlock()
@@ -530,7 +538,7 @@ func (s *state) shutdown(c *gin.Context) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	msg, err := sshPoweroff(shutdownTarget(ip), user, keyPath)
+	msg, err := sshPoweroff(shutdownTarget(ip), user, keyPath, password)
 	s.mu.Lock()
 	s.lastShutdown[id] = now
 	s.mu.Unlock()
