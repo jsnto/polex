@@ -246,7 +246,7 @@ adb install android/apk/polex-debug.apk
    (persisted via `POST /api/servers/reorder`).
 4. On the dashboard, **tap a server** to open its detail page: live status
    (online/latency/last checked/last wake/last shutdown), the configured
-   settings (incl. the SSH user/key), and the same single **power** button
+   settings (incl. the SSH user/key/password), and the same single **power** button
    (stroke power icon, green = online, red = offline; online → power off
    over SSH, offline → wake); system back returns to the dashboard.
 
