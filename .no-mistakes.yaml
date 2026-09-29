@@ -1,0 +1,5 @@
+# no-mistakes repository configuration
+#
+# This repository has no CI workflows or check-runs; the pipeline CI step
+# must not babysit an open PR for checks that will never register.
+no_ci: true
