@@ -133,7 +133,7 @@ password lives in the same per-server config blob as the other fields
 - **The private key is a file on the backend host.** The config blob
   (`data.json`) holds only the *path* (`sshKeyPath`), never key material.
   A leading `~/` is expanded to the backend's home dir. Under Docker, mount
-  the key (e.g. `./ssh:/app/ssh:ro`) and use the the in-container path
+  the key (e.g. `./ssh:/app/ssh:ro`) and use the in-container path
   (`/app/ssh/id_ed25519`) — see `docker-compose.yml`.
 - **Fallback rules:** the password fallback is for *authentication
   failures only*. A key attempt that fails for a non-auth reason (timeout,
