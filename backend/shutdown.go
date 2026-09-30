@@ -15,8 +15,8 @@ import (
 // ---------- SSH shutdown ----------
 //
 // A server with sshUser set plus at least one credential (sshKeyPath and/or
-// sshPassword) can be powered off with a clean `systemctl poweroff` over
-// SSH. Credentials are tried in order, key first: when sshKeyPath is set
+// sshPassword) can be powered off with a clean `sudo systemctl poweroff`
+// over SSH. Credentials are tried in order, key first: when sshKeyPath is set
 // the key is offered, and if sshd rejects it (an authentication failure)
 // the password is offered next within the same handshake. When sshKeyPath
 // is empty, the password is used directly. A key file that fails to load
@@ -39,7 +39,11 @@ import (
 // the plain-HTTP posture of the rest of polex. Pin the host key (e.g.
 // ssh.FixedHostKey) if you need MITM protection on a less trusted segment.
 
-const shutdownCommand = "systemctl poweroff"
+// The `sudo` prefix is required: an unprivileged user's bare
+// `systemctl poweroff` is denied by the target, while the sudo form works
+// with a passwordless sudoers rule for exactly this command (see the
+// "Power off over SSH" README section for the rule).
+const shutdownCommand = "sudo systemctl poweroff"
 
 // sshTotalTimeout is the one deadline for the whole shutdown SSH sequence
 // (dial, handshake, session start, exec wait): it stays under the app's
@@ -114,10 +118,10 @@ func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, string, error) 
 	return auths, keyNote, nil
 }
 
-// sshPoweroff connects to addr as user and runs `systemctl poweroff` using
-// the credentials in keyPath/password order (see sshAuthMethods: key first,
-// password when the key is rejected by sshd or fails to load, password
-// directly when no key is configured). It returns a human-facing success
+// sshPoweroff connects to addr as user and runs `sudo systemctl poweroff`
+// using the credentials in keyPath/password order (see sshAuthMethods: key
+// first, password when the key is rejected by sshd or fails to load,
+// password directly when no key is configured). It returns a human-facing
 // message, or an honest, distinct error:
 //
 //   - the key file is missing/unreadable/invalid on the backend host and no
@@ -154,8 +158,8 @@ func sshPoweroff(addr, user, keyPath, password string) (string, error) {
 	return fmt.Sprintf("%s; key error: %s (password used)", msg, keyNote), nil
 }
 
-// sshPoweroffWithAuths runs `systemctl poweroff` on addr with the given
-// ordered credentials.
+// sshPoweroffWithAuths runs `sudo systemctl poweroff` on addr with the
+// given ordered credentials.
 func sshPoweroffWithAuths(addr, user string, auths []ssh.AuthMethod) (string, error) {
 	// One total deadline for the WHOLE sequence — every credential
 	// attempt included. x/crypto/ssh's dial timeout only bounds the TCP

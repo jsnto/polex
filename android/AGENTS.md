@@ -98,7 +98,7 @@ errors. Prefer that over manual runs when verifying app changes.
   a confirmation dialog; the power button's direction follows the server's
   current online state — offline: `Api.sendWol(context, id)` →
   `POST /api/servers/:id/wol`; online: `Api.sendShutdown(context, id)` →
-  `POST /api/servers/:id/shutdown` (clean `systemctl poweroff` over SSH,
+  `POST /api/servers/:id/shutdown` (clean `sudo systemctl poweroff` over SSH,
   key then password auth). Success = `code in 200..299 && parseOk(body)`
   (both endpoints return HTTP 200 even when the action fails — branch on
   `ok`). The control is the shared `PowerButton` composable (the stroke
