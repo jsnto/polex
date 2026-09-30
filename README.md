@@ -165,6 +165,7 @@ the backend host** — the config holds only its path (`sshKeyPath`, `~/...`
 expanded); under Docker, mount the key dir into the container (see
 `backend/docker-compose.yml`). The password is stored in the same per-server
 config blob (bearer-token-protected home-lab config — no extra secret store).
+
 The command runs through sudo, so the target must let the SSH user power
 off without a password prompt: either the SSH user is root, or there is a
 passwordless sudoers rule for the exact command — e.g. an
@@ -181,6 +182,7 @@ target's `command -v systemctl` result; check the file with
 `visudo -cf /etc/sudoers.d/polex`.) Without the rule, non-interactive
 sudo fails — there is no TTY to prompt a password — and the app shows
 sudo's error in the shutdown result.
+
 Honest limits:
 
 - **In-band only:** the shutdown works only while the target's OS and sshd
