@@ -15,8 +15,9 @@ import (
 // ---------- SSH shutdown ----------
 //
 // A server with sshUser set plus at least one credential (sshKeyPath and/or
-// sshPassword) can be powered off with a clean `sudo systemctl poweroff`
-// over SSH. Credentials are tried in order, key first: when sshKeyPath is set
+// sshPassword) can be powered off with a clean poweroff command over SSH
+// (the per-server poweroffCommand field verbatim when set, the default
+// `sudo systemctl poweroff` when empty). Credentials are tried in order, key first: when sshKeyPath is set
 // the key is offered, and if sshd rejects it (an authentication failure)
 // the password is offered next within the same handshake. When sshKeyPath
 // is empty, the password is used directly. A key file that fails to load
@@ -42,8 +43,20 @@ import (
 // The `sudo` prefix is required: an unprivileged user's bare
 // `systemctl poweroff` is denied by the target, while the sudo form works
 // with a passwordless sudoers rule for exactly this command (see the
-// "Power off over SSH" README section for the rule).
+// "Power off over SSH" README section for the rule). This is the DEFAULT
+// poweroff command; a server's non-empty poweroffCommand field replaces it
+// entirely (see poweroffCommandFor).
 const shutdownCommand = "sudo systemctl poweroff"
+
+// poweroffCommandFor resolves the command the shutdown path sends over
+// SSH: the per-server value verbatim when set, the default when empty
+// (empty = unset, e.g. configs saved before the field existed).
+func poweroffCommandFor(cmd string) string {
+	if cmd != "" {
+		return cmd
+	}
+	return shutdownCommand
+}
 
 // sshTotalTimeout is the one deadline for the whole shutdown SSH sequence
 // (dial, handshake, session start, exec wait): it stays under the app's
@@ -118,8 +131,10 @@ func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, string, error) 
 	return auths, keyNote, nil
 }
 
-// sshPoweroff connects to addr as user and runs `sudo systemctl poweroff`
-// using the credentials in keyPath/password order (see sshAuthMethods: key
+// sshPoweroff connects to addr as user and runs the server's poweroff
+// command (poweroffCmd verbatim when set, the default
+// `sudo systemctl poweroff` when empty — see poweroffCommandFor) using the
+// credentials in keyPath/password order (see sshAuthMethods: key
 // first, password when the key is rejected by sshd or fails to load,
 // password directly when no key is configured). It returns a human-facing
 // message, or an honest, distinct error:
@@ -138,7 +153,7 @@ func sshAuthMethods(keyPath, password string) ([]ssh.AuthMethod, string, error) 
 // A connection that dies right after sshd accepted the command is treated
 // as success: the host is powering off and tears down the SSH session, so
 // the exit status may never arrive.
-func sshPoweroff(addr, user, keyPath, password string) (string, error) {
+func sshPoweroff(addr, user, keyPath, password, poweroffCmd string) (string, error) {
 	auths, keyNote, err := sshAuthMethods(keyPath, password)
 	if err != nil {
 		return "", err
@@ -148,7 +163,7 @@ func sshPoweroff(addr, user, keyPath, password string) (string, error) {
 		// the API; guard the direct-call path anyway.
 		return "", fmt.Errorf("no ssh credentials configured for %s", user)
 	}
-	msg, err := sshPoweroffWithAuths(addr, user, auths)
+	msg, err := sshPoweroffWithAuths(addr, user, auths, poweroffCommandFor(poweroffCmd))
 	if keyNote == "" {
 		return msg, err
 	}
@@ -158,9 +173,9 @@ func sshPoweroff(addr, user, keyPath, password string) (string, error) {
 	return fmt.Sprintf("%s; key error: %s (password used)", msg, keyNote), nil
 }
 
-// sshPoweroffWithAuths runs `sudo systemctl poweroff` on addr with the
+// sshPoweroffWithAuths runs the given poweroff command on addr with the
 // given ordered credentials.
-func sshPoweroffWithAuths(addr, user string, auths []ssh.AuthMethod) (string, error) {
+func sshPoweroffWithAuths(addr, user string, auths []ssh.AuthMethod, command string) (string, error) {
 	// One total deadline for the WHOLE sequence — every credential
 	// attempt included. x/crypto/ssh's dial timeout only bounds the TCP
 	// connect, so the handshake is bounded by a deadline on the conn
@@ -211,7 +226,7 @@ func sshPoweroffWithAuths(addr, user string, auths []ssh.AuthMethod) (string, er
 			return
 		}
 		sess.Stderr = &stderr
-		if err := sess.Start(shutdownCommand); err != nil {
+		if err := sess.Start(command); err != nil {
 			sess.Close()
 			started <- sessionStart{err: fmt.Errorf("server refused the poweroff command: %v", err)}
 			return

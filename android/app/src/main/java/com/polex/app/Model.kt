@@ -15,6 +15,7 @@ data class SrvStatus(
     val sshUser: String,   // SSH power-off (with sshKeyPath and/or sshPassword); user alone = off
     val sshKeyPath: String, // path to the private key on the backend host
     val sshPassword: String, // password auth; fallback after a rejected key (direct when no key)
+    val poweroffCommand: String = "", // command run over SSH on power off; empty = backend default (sudo systemctl poweroff)
     val online: Boolean,
     val latencyMs: Long,
     val lastChecked: String,
@@ -36,6 +37,7 @@ fun parseStatusArray(body: String): List<SrvStatus> {
             sshUser = o.optString("sshUser"),
             sshKeyPath = o.optString("sshKeyPath"),
             sshPassword = o.optString("sshPassword"),
+            poweroffCommand = o.optString("poweroffCommand"),
             online = o.optBoolean("online"),
             latencyMs = o.optLong("latencyMs"),
             lastChecked = o.optString("lastChecked"),
@@ -56,6 +58,7 @@ data class SrvEntry(
     val sshUser: String = "",
     val sshKeyPath: String = "",
     val sshPassword: String = "",
+    val poweroffCommand: String = "", // command run over SSH on power off; empty = backend default
 )
 
 fun parseServerArray(body: String): List<SrvEntry> {
@@ -72,6 +75,7 @@ fun parseServerArray(body: String): List<SrvEntry> {
             sshUser = o.optString("sshUser"),
             sshKeyPath = o.optString("sshKeyPath"),
             sshPassword = o.optString("sshPassword"),
+            poweroffCommand = o.optString("poweroffCommand"),
         )
     }
 }
@@ -90,6 +94,7 @@ fun serverToJson(
     sshUser: String = "",
     sshKeyPath: String = "",
     sshPassword: String = "",
+    poweroffCommand: String = "",
 ): String {
     val o = JSONObject()
     o.put("name", name)
@@ -100,8 +105,17 @@ fun serverToJson(
     o.put("sshUser", sshUser)
     o.put("sshKeyPath", sshKeyPath)
     o.put("sshPassword", sshPassword)
+    o.put("poweroffCommand", poweroffCommand)
     return o.toString()
 }
+
+/** The command the backend runs over SSH when a server's poweroffCommand is empty. */
+const val DEFAULT_POWEROFF_COMMAND = "sudo systemctl poweroff"
+
+/** The exact command the backend sends over SSH for this server: the per-server
+ *  [SrvStatus.poweroffCommand] override when set, the default when it is empty. */
+fun SrvStatus.effectivePoweroffCommand(): String =
+    if (poweroffCommand.isNotEmpty()) poweroffCommand else DEFAULT_POWEROFF_COMMAND
 
 /** Body for POST /api/servers/reorder: {"order": [id, id, ...]}. */
 fun reorderJson(ids: List<Int>): String {

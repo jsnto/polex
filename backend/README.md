@@ -3,8 +3,9 @@
 Go + Gin REST API. Keeps a configurable list of servers, health-checks them
 on an interval (a TCP port connect, or an ICMP ping, per server), and sends
 Wake-on-LAN magic packets on demand. Servers with optional SSH config can
-also be powered off cleanly (`sudo systemctl poweroff` over SSH, key auth
-with an optional password fallback).
+also be powered off cleanly (a per-server poweroff command — default
+`sudo systemctl poweroff` — sent over SSH, key auth with an optional
+password fallback).
 
 > Agent/handler documentation: see [`AGENTS.md`](AGENTS.md).
 
@@ -54,13 +55,13 @@ requests get `401 {"ok": false, "error": "unauthorized"}`.
 | GET    | `/api/health`          | no   | liveness                           |
 | POST   | `/api/login`           | no   | `{username, password, remember?}` → `{ok, token}` (401 on bad creds); `remember: true` grants a token with the `POLEX_REMEMBER_TTL` lifetime |
 | GET    | `/api/servers`         | yes  | configured servers                 |
-| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?}` |
+| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?}` |
 | POST   | `/api/servers/reorder` | yes  | set order `{order: [id, ...]}`        |
 | PUT    | `/api/servers/:id`     | yes  | update server                      |
 | DELETE | `/api/servers/:id`     | yes  | remove server                      |
 | GET    | `/api/status`          | yes  | live status of all servers         |
 | POST   | `/api/servers/:id/wol` | yes  | send Wake-on-LAN packet            |
-| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (`sudo systemctl poweroff`, key then password auth), see below |
+| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (sends the server's poweroff command, default `sudo systemctl poweroff`; key then password auth), see below |
 | GET    | `/api/version`         | yes  | backend version `{"version":"…"}` (constant `Version` in `version.go`) |
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
@@ -82,6 +83,7 @@ after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.
     "sshUser": "root",
     "sshKeyPath": "/app/keys/polex",
     "sshPassword": "",
+    "poweroffCommand": "",
     "online": true,
     "latencyMs": 3,
     "lastChecked": "2026-09-09T01:27:07Z",
@@ -120,7 +122,9 @@ logs a warning.
 
 A server with `sshUser` set plus at least one credential (`sshKeyPath`
 and/or `sshPassword`) gets a power-off action: `POST /api/servers/:id/shutdown`
-connects to `ip:22` with that user and runs `sudo systemctl poweroff`.
+connects to `ip:22` with that user and runs the server's poweroff command —
+the `poweroffCommand` field verbatim when set, the default `sudo systemctl
+poweroff` when left empty.
 Credentials are tried in order, key first: if the key path is set the key is
 offered, and if sshd rejects it (an authentication failure) the password is
 offered next within the same handshake; with no key path the password is used
@@ -155,8 +159,9 @@ credentials without a user) is rejected by validation. No extra secret store
   command cannot run, and the endpoint says so. Out-of-band mechanisms
   (BMC, smart plug) are the fallback for that case and are not implemented
   here.
-- **Success semantics:** `sudo systemctl poweroff` returns as soon as systemd
-  enqueues the job, so the response ("shutdown command accepted") arrives
+- **Success semantics:** with the default command, `sudo systemctl poweroff`
+  returns as soon as systemd enqueues the job, so the response
+  ("shutdown command accepted") arrives
   before the machine is actually off. A connection that dies right after the
   command was accepted is treated as success (the host is powering off and
   tears down the SSH session). One 4.5 s total deadline bounds the WHOLE SSH
@@ -171,8 +176,9 @@ credentials without a user) is rejected by validation. No extra secret store
   (`ssh.InsecureIgnoreHostKey`) — the backend sits on a trusted LAN behind
   bearer-token auth, matching polex's plain-HTTP posture. A leaked token can
   now power servers off; keep it as protected as `POLEX_PASSWORD`.
-- **Server-side prerequisite (sudo):** the command runs through sudo, so
-  the target must let the SSH user power off without a password prompt:
+- **Server-side prerequisite (sudo, default command):** the default command
+  runs through sudo, so the target must let the SSH user power off without a
+  password prompt:
   either the SSH user is root, or there is a passwordless sudoers rule for
   the exact command — e.g. an `/etc/sudoers.d/polex` line granting
   NOPASSWD for the `poweroff` subcommand only, using the systemctl path
@@ -187,7 +193,9 @@ credentials without a user) is rejected by validation. No extra secret store
   target's `command -v systemctl` result; check the file with
   `visudo -cf /etc/sudoers.d/polex`.) Without the rule, non-interactive
   sudo fails — there is no TTY to prompt a password — and the app shows
-  sudo's error in the shutdown result.
+  sudo's error in the shutdown result. A custom `poweroffCommand` replaces
+  the whole command (this prerequisite then applies to whatever you set
+  instead).
 
 > **WOL requirements:** the backend must be on the same L2 network as the
 > target machine, and the target's NIC/BIOS must have Wake-on-LAN enabled.

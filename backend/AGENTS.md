@@ -47,7 +47,8 @@ the backend runs with `admin`/`polex` and logs a loud `WARN` — never ship that
   key then password auth — `sshAuthMethods` orders the credentials, key
   first, and a key rejected by sshd, or whose file fails to load, falls
   through to the password when one is set (the key error stays visible in
-  the result); `sudo systemctl poweroff`), `sshConfigured` (user + at
+  the result); runs the server's `poweroffCommand` — default
+  `sudo systemctl poweroff`, `poweroffCommandFor`), `sshConfigured` (user + at
   least one credential), `expandHome`, `shutdownTarget`, the `sshPort` var
   (tests point it at an in-process SSH server).
 - `version.go` — backend version constant (`Version`, keep in sync with the
@@ -123,15 +124,15 @@ login).
 | GET    | `/api/health`        | `{ok, time}` — **public** (used by scripts)   |
 | POST   | `/api/login`         | `{username,password,remember?}` → `{ok, token}` — **public** |
 | GET    | `/api/servers`       | configured servers                             |
-| POST   | `/api/servers`       | body `{name, ip, mac?, port?, check?}` → validates, runs an immediate check |
+| POST   | `/api/servers`       | body `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?}` → validates, runs an immediate check |
 | POST   | `/api/servers/reorder` | body `{order: [id, ...]}` → reorders the list (drives display + `/api/status` order) |
 | PUT    | `/api/servers/:id`   | full replacement of the entry                  |
 | DELETE | `/api/servers/:id`   | removes from list, status cache, and disk      |
 | GET    | `/api/status`        | live status per server                         |
 | POST   | `/api/servers/:id/wol` | sends WOL; returns `{ok, message, lastWolAt}` (200 even on WOL failure — check `ok`) |
-| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`sudo systemctl poweroff`, key then password auth); 400 when the server has no usable SSH config (`sshUser` plus a key path and/or password); 200 `{ok, message, lastShutdownAt}` (check `ok` — 200 on run failures too) |
+| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (sends the server's poweroff command, default `sudo systemctl poweroff`; key then password auth); 400 when the server has no usable SSH config (`sshUser` plus a key path and/or password); 200 `{ok, message, lastShutdownAt}` (check `ok` — 200 on run failures too) |
 
-`GET /api/status` item: `{id, name, ip, mac, port, check, sshUser, sshKeyPath, sshPassword, online, latencyMs, lastChecked, lastWolAt, lastShutdownAt}`.
+`GET /api/status` item: `{id, name, ip, mac, port, check, sshUser, sshKeyPath, sshPassword, poweroffCommand, online, latencyMs, lastChecked, lastWolAt, lastShutdownAt}`.
 `lastChecked` is `"never"` if the first check hasn't completed.
 `lastWolAt`/`lastShutdownAt` record the last attempt (even failed ones);
 in-memory only (cleared on backend restart).
@@ -162,7 +163,9 @@ in-memory only (cleared on backend restart).
   credential, or credentials without a user). `sshPoweroff` dials `ip:22`
   (`sshPort` var; one 4.5 s total deadline over dial, handshake with every
   credential attempt, session start, and the exit-status wait — under the
-  app's 5 s read timeout) and runs `sudo systemctl poweroff` with ordered
+  app's 5 s read timeout) and runs the server's poweroff command (the
+  `poweroffCommand` field verbatim when set, default `sudo systemctl poweroff`)
+  with ordered
   credentials: key first, then the password — the password is offered only
   after sshd rejected the key (an authentication failure), after the key
   file failed to load (missing/unreadable/invalid — the key error then
