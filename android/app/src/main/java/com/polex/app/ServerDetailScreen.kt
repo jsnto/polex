@@ -319,7 +319,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                 Text(
                     when {
                         s.online && s.sshConfigured() ->
-                            "A clean shutdown (systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
+                            "A clean shutdown (sudo systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
                         s.online ->
                             "This server has no SSH power-off configured (SSH user plus a key path and/or password), so it cannot be powered off from the app."
                         s.mac.isNotEmpty() ->

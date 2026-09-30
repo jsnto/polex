@@ -20,7 +20,7 @@ screen widget.
   **power** button (a stroke-style power symbol — open circle with a
   vertical line, from `res/drawable/ic_power.xml` — tinted by status: green
   when online, red when offline). The button is a toggle driven by the
-  server's current state: **online → power off** (a clean `systemctl
+  server's current state: **online → power off** (a clean `sudo systemctl
   poweroff` over SSH, dimmed when the server has no SSH power-off
   configured) and **offline → power on** (a Wake-on-LAN packet, dimmed when
   no MAC is configured) — each asks for confirmation in a dialog ("Power off
