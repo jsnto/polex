@@ -152,15 +152,17 @@ func genTestKey(t *testing.T, dir string) string {
 
 // authRecorder records which credential types a client offered during the
 // handshake, so tests can assert the key-then-password order (and that a
-// successful key never burns a password attempt).
+// successful key never burns a password attempt), plus the command the
+// client started via exec.
 type authRecorder struct {
 	keyOffered      atomic.Bool
 	passwordOffered atomic.Bool
+	execCommand     atomic.Value // holds the started exec command (string)
 }
 
 // fakeSSHServer starts an in-process SSH server on 127.0.0.1 that answers
-// the `systemctl poweroff` exec request per mode and returns its port plus
-// a recorder of the offered credentials:
+// the `sudo systemctl poweroff` exec request per mode and returns its port
+// plus a recorder of the offered credentials and the started command:
 //
 //	"ok"         — accept any key; exit status 0 (clean acceptance)
 //	"fail"       — accept any key; stderr + exit status 127
@@ -246,6 +248,10 @@ func fakeSSHServer(t *testing.T, mode string) (int, *authRecorder) {
 						}
 						if req.Type != "exec" {
 							continue
+						}
+						// The exec payload is an SSH string: 4-byte length + bytes.
+						if len(req.Payload) >= 4 {
+							rec.execCommand.Store(string(req.Payload[4:]))
 						}
 						switch mode {
 						case "fail":
@@ -336,7 +342,7 @@ type shutdownResp struct {
 
 func TestShutdownHandlerSuccess(t *testing.T) {
 	keyFile := genTestKey(t, t.TempDir())
-	port, _ := fakeSSHServer(t, "ok")
+	port, rec := fakeSSHServer(t, "ok")
 	oldPort := sshPort
 	sshPort = port
 	defer func() { sshPort = oldPort }()
@@ -366,6 +372,9 @@ func TestShutdownHandlerSuccess(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("ok = false (body %s)", w.Body.String())
 	}
+	if got := rec.execCommand.Load(); got != "sudo systemctl poweroff" {
+		t.Fatalf("started command = %q, want %q", got, "sudo systemctl poweroff")
+	}
 	if resp.LastShutdownAt == "" {
 		t.Fatalf("lastShutdownAt empty in response")
 	}
@@ -382,7 +391,7 @@ func TestShutdownHandlerSuccess(t *testing.T) {
 
 func TestShutdownHandlerConnectionDrop(t *testing.T) {
 	keyFile := genTestKey(t, t.TempDir())
-	port, _ := fakeSSHServer(t, "drop")
+	port, rec := fakeSSHServer(t, "drop")
 	oldPort := sshPort
 	sshPort = port
 	defer func() { sshPort = oldPort }()
@@ -404,11 +413,14 @@ func TestShutdownHandlerConnectionDrop(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("ok = false after connection drop (body %s)", w.Body.String())
 	}
+	if got := rec.execCommand.Load(); got != "sudo systemctl poweroff" {
+		t.Fatalf("started command = %q, want %q", got, "sudo systemctl poweroff")
+	}
 }
 
 func TestShutdownHandlerCommandFailure(t *testing.T) {
 	keyFile := genTestKey(t, t.TempDir())
-	port, _ := fakeSSHServer(t, "fail")
+	port, rec := fakeSSHServer(t, "fail")
 	oldPort := sshPort
 	sshPort = port
 	defer func() { sshPort = oldPort }()
@@ -427,6 +439,9 @@ func TestShutdownHandlerCommandFailure(t *testing.T) {
 	}
 	if resp.OK {
 		t.Fatalf("ok = true for a failed command (body %s)", w.Body.String())
+	}
+	if got := rec.execCommand.Load(); got != "sudo systemctl poweroff" {
+		t.Fatalf("started command = %q, want %q", got, "sudo systemctl poweroff")
 	}
 	if !strings.Contains(resp.Message, "poweroff command failed") || !strings.Contains(resp.Message, "systemctl: not found") {
 		t.Fatalf("message = %q", resp.Message)
@@ -856,7 +871,7 @@ func TestShutdownHandlerSlowConfirm(t *testing.T) {
 	// systemd): still a success, and the wait must stay inside the total
 	// deadline.
 	keyFile := genTestKey(t, t.TempDir())
-	port, _ := fakeSSHServer(t, "stall")
+	port, rec := fakeSSHServer(t, "stall")
 	oldPort := sshPort
 	sshPort = port
 	defer func() { sshPort = oldPort }()
@@ -879,5 +894,8 @@ func TestShutdownHandlerSlowConfirm(t *testing.T) {
 	}
 	if !resp.OK || !strings.Contains(resp.Message, "did not confirm") {
 		t.Fatalf("resp = %+v (body %s)", resp, w.Body.String())
+	}
+	if got := rec.execCommand.Load(); got != "sudo systemctl poweroff" {
+		t.Fatalf("started command = %q, want %q", got, "sudo systemctl poweroff")
 	}
 }

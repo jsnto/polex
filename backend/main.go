@@ -503,7 +503,7 @@ func (s *state) sendWol(c *gin.Context) {
 	c.JSON(200, gin.H{"ok": true, "message": msg, "lastWolAt": now})
 }
 
-// shutdown runs a clean `systemctl poweroff` on the server over SSH (the
+// shutdown runs a clean `sudo systemctl poweroff` on the server over SSH (the
 // sendWol shape: look up, validate configured, run, record, respond).
 // lastShutdownAt is best-effort: it is written after sshPoweroff returns,
 // in-memory only (cleared on restart, like lastWolAt), and in the

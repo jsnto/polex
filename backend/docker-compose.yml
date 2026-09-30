@@ -19,7 +19,7 @@ services:
     volumes:
       - ./data:/app/data         # persists data.json (server list)
       # SSH power-off keys (optional): a server with sshUser + sshKeyPath
-      # set is powered off via `systemctl poweroff` over SSH with that key
+      # set is powered off via `sudo systemctl poweroff` over SSH with that key
       # (a password-only sshPassword needs no key file). The private
       # key lives as a file on this host — mount it into the container and
       # point the server's sshKeyPath at the in-container path, e.g.:
