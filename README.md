@@ -5,9 +5,10 @@ Home-lab server status + Wake-on-LAN, from your phone.
 - **Backend** (Go + Gin): keeps a configurable list of servers, checks each
   one on an interval (a TCP port connect, or an ICMP ping, per server),
   exposes status over REST, sends Wake-on-LAN "magic packets" on demand, and
-  can power a server off cleanly over SSH (`sudo systemctl poweroff`, key auth
-  with an optional password fallback — per-server opt-in via `sshUser` plus
-  `sshKeyPath` and/or `sshPassword`).
+  can power a server off cleanly over SSH (a per-server poweroff command —
+  `poweroffCommand`, default `sudo systemctl poweroff` — sent over an SSH
+  session, key auth with an optional password fallback; per-server opt-in via
+  `sshUser` plus `sshKeyPath` and/or `sshPassword`).
 - **Android app** (Kotlin, Jetpack Compose):
   - **login screen** — signs in via `POST /api/login` and stores the
     returned bearer token; every API call sends it, and a 401 from the
@@ -19,8 +20,9 @@ Home-lab server status + Wake-on-LAN, from your phone.
     latency, last wake time) with a single **power** button per server (the
     stroke-style power symbol — open circle with a vertical line — tinted by
     status: green when online, red when offline). The button is a toggle
-    driven by the server's current state: **online → power off** (a clean
-    `sudo systemctl poweroff` over SSH; dimmed when the server has no SSH power-off
+    driven by the server's current state: **online → power off** (the
+    server's poweroff command — default a clean `sudo systemctl poweroff` —
+    sent over SSH; dimmed when the server has no SSH power-off
     configured) and **offline → power on** (a Wake-on-LAN magic packet; dimmed
     when no MAC is configured) — each direction asks for confirmation in a
     dialog ("Power off <server>?" / "Send wake to <server>?"); tapping a
@@ -130,13 +132,13 @@ unauthenticated calls get `401`.
 | POST   | `/api/login`        | `{username, password, remember?}` → `{ok, token}` |
 | GET    | `/api/health`       | liveness (public)                                      |
 | GET    | `/api/servers`      | configured servers                                     |
-| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?}` |
+| POST   | `/api/servers`      | add server `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?}` |
 | POST   | `/api/servers/reorder` | set display order `{order: [id, ...]}`          |
 | PUT    | `/api/servers/:id`  | update server                                          |
 | DELETE | `/api/servers/:id`  | remove server                                          |
-| GET    | `/api/status`       | live status: `{id,name,ip,mac,port,check,sshUser,sshKeyPath,sshPassword,online,latencyMs,lastChecked,lastWolAt,lastShutdownAt}` |
+| GET    | `/api/status`       | live status: `{id,name,ip,mac,port,check,sshUser,sshKeyPath,sshPassword,poweroffCommand,online,latencyMs,lastChecked,lastWolAt,lastShutdownAt}` |
 | POST   | `/api/servers/:id/wol` | send Wake-on-LAN packet to the server's MAC (the power button's **offline** direction) |
-| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (`sudo systemctl poweroff`, key then password auth) (the power button's **online** direction) |
+| POST   | `/api/servers/:id/shutdown` | clean SSH shutdown (sends the server's poweroff command, default `sudo systemctl poweroff`; key then password auth) (the power button's **online** direction) |
 | GET    | `/api/version`        | backend version `{"version":"…"}` (constant `Version` in `backend/version.go`) |
 
 WOL packets are sent via UDP to `255.255.255.255:9` **and** to the /24 subnet
@@ -151,8 +153,10 @@ broadcast of the server's IP (e.g. `192.168.1.255:9`), plus any addresses in
 
 Servers with `sshUser` set plus at least one credential — `sshKeyPath` and/or
 `sshPassword` — can be powered off cleanly from the app (the power button's
-**online** direction: `POST /api/servers/:id/shutdown` runs `sudo systemctl
-poweroff` over SSH). Credentials are tried in order, key first: the key is
+**online** direction: `POST /api/servers/:id/shutdown` runs the server's
+poweroff command over SSH — the per-server `poweroffCommand` field verbatim
+when set, the default `sudo systemctl poweroff` when left empty).
+Credentials are tried in order, key first: the key is
 offered, and if sshd rejects it (an authentication failure) the password is
 offered next within the same handshake; a key file that fails to load
 (missing/unreadable/invalid) falls back to the password on its own when one
@@ -166,9 +170,9 @@ expanded); under Docker, mount the key dir into the container (see
 `backend/docker-compose.yml`). The password is stored in the same per-server
 config blob (bearer-token-protected home-lab config — no extra secret store).
 
-The command runs through sudo, so the target must let the SSH user power
-off without a password prompt: either the SSH user is root, or there is a
-passwordless sudoers rule for the exact command — e.g. an
+The **default** command runs through sudo, so the target must let the SSH
+user power off without a password prompt: either the SSH user is root, or
+there is a passwordless sudoers rule for the exact command — e.g. an
 `/etc/sudoers.d/polex` line granting NOPASSWD for the `poweroff`
 subcommand only, using the systemctl path from `command -v systemctl`
 on the target so the rule covers nothing else:
@@ -181,7 +185,10 @@ youruser ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff
 target's `command -v systemctl` result; check the file with
 `visudo -cf /etc/sudoers.d/polex`.) Without the rule, non-interactive
 sudo fails — there is no TTY to prompt a password — and the app shows
-sudo's error in the shutdown result.
+sudo's error in the shutdown result. A custom `poweroffCommand` replaces
+the whole command (the sudo setup above only concerns the default), so
+whatever you set must run non-interactively and must actually power the
+machine off.
 
 Honest limits:
 
@@ -260,11 +267,14 @@ adb install android/apk/polex-debug.apk
    the machine running the backend (the key is tried first; a rejected or
    broken key falls back to the password when one is set), and the server's
    **power** button is active
-   for the power-off direction. Drag the ⋮ handle to **reorder** the list
+   for the power-off direction. The **Power off command** field (optional)
+   sets the exact command run over SSH when powering the server off; leave
+   it empty for the default `sudo systemctl poweroff` (it only applies when
+   the SSH power-off is enabled). Drag the ⋮ handle to **reorder** the list
    (persisted via `POST /api/servers/reorder`).
 4. On the dashboard, **tap a server** to open its detail page: live status
    (online/latency/last checked/last wake/last shutdown), the configured
-   settings (incl. the SSH user/key/password), and the same single **power** button
+   settings (incl. the SSH user/key/password and the power off command), and the same single **power** button
    (stroke power icon, green = online, red = offline; online → power off
    over SSH, offline → wake); system back returns to the dashboard.
 

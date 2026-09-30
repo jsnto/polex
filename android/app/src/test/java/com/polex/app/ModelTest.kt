@@ -17,6 +17,7 @@ class ModelTest {
         sshUser: String = "",
         sshKeyPath: String = "",
         sshPassword: String = "",
+        poweroffCommand: String = "",
         lastShutdownAt: String = "",
     ): String = """
         [
@@ -30,6 +31,7 @@ class ModelTest {
             "sshUser": "$sshUser",
             "sshKeyPath": "$sshKeyPath",
             "sshPassword": "$sshPassword",
+            "poweroffCommand": "$poweroffCommand",
             "online": true,
             "latencyMs": 3,
             "lastChecked": "2026-09-09T01:27:07Z",
@@ -46,6 +48,7 @@ class ModelTest {
                 sshUser = "root",
                 sshKeyPath = "/app/keys/polex",
                 sshPassword = "s3cret",
+                poweroffCommand = "echo bye-bye",
                 lastShutdownAt = "2026-09-09T02:00:00Z",
             ),
         )
@@ -54,6 +57,7 @@ class ModelTest {
         assertEquals("root", s.sshUser)
         assertEquals("/app/keys/polex", s.sshKeyPath)
         assertEquals("s3cret", s.sshPassword)
+        assertEquals("echo bye-bye", s.poweroffCommand)
         assertEquals("2026-09-09T02:00:00Z", s.lastShutdownAt)
         assertTrue(s.sshConfigured())
     }
@@ -76,6 +80,7 @@ class ModelTest {
         assertEquals("", items[0].sshUser)
         assertEquals("", items[0].sshKeyPath)
         assertEquals("", items[0].sshPassword)
+        assertEquals("", items[0].poweroffCommand)
         assertEquals("", items[0].lastShutdownAt)
         assertFalse(items[0].sshConfigured())
     }
@@ -86,7 +91,7 @@ class ModelTest {
             [
               {
                 "id": 2, "name": "WS", "ip": "192.168.1.11", "mac": "",
-                "port": 22, "check": "tcp", "sshUser": "admin", "sshKeyPath": "~/keys/polex", "sshPassword": "pw"
+                "port": 22, "check": "tcp", "sshUser": "admin", "sshKeyPath": "~/keys/polex", "sshPassword": "pw", "poweroffCommand": "shutdown -h now"
               }
             ]
         """.trimIndent()
@@ -95,21 +100,24 @@ class ModelTest {
         assertEquals("admin", items[0].sshUser)
         assertEquals("~/keys/polex", items[0].sshKeyPath)
         assertEquals("pw", items[0].sshPassword)
+        assertEquals("shutdown -h now", items[0].poweroffCommand)
 
         // Missing fields (legacy backend) → empty, not a crash.
         val legacy = parseServerArray("""[{"id":3,"name":"x","ip":"1.2.3.4","mac":"","port":22,"check":"tcp"}]""")
         assertEquals("", legacy[0].sshUser)
         assertEquals("", legacy[0].sshKeyPath)
         assertEquals("", legacy[0].sshPassword)
+        assertEquals("", legacy[0].poweroffCommand)
     }
 
     @Test
     fun serverToJsonCarriesSshFields() {
-        val json = serverToJson("NAS", "192.168.1.10", "AA:BB:CC:DD:EE:01", 22, "tcp", "root", "/keys/polex", "s3cret")
+        val json = serverToJson("NAS", "192.168.1.10", "AA:BB:CC:DD:EE:01", 22, "tcp", "root", "/keys/polex", "s3cret", "echo bye")
         val o = JSONObject(json)
         assertEquals("root", o.getString("sshUser"))
         assertEquals("/keys/polex", o.getString("sshKeyPath"))
         assertEquals("s3cret", o.getString("sshPassword"))
+        assertEquals("echo bye", o.getString("poweroffCommand"))
         assertEquals("NAS", o.getString("name"))
     }
 
@@ -122,6 +130,21 @@ class ModelTest {
         assertEquals("", o.getString("sshUser"))
         assertEquals("", o.getString("sshKeyPath"))
         assertEquals("", o.getString("sshPassword"))
+        assertEquals("", o.getString("poweroffCommand"))
+    }
+
+    @Test
+    fun effectivePoweroffCommandFallsBackToDefault() {
+        // Empty field → the backend default; a set value → verbatim.
+        val base = SrvStatus(
+            id = 1, name = "NAS", ip = "192.168.1.10", mac = "", port = 22,
+            check = "tcp", sshUser = "root", sshKeyPath = "/keys/polex", sshPassword = "",
+            poweroffCommand = "", online = true, latencyMs = 0, lastChecked = "",
+            lastWolAt = "", lastShutdownAt = "",
+        )
+        assertEquals(DEFAULT_POWEROFF_COMMAND, base.effectivePoweroffCommand())
+        assertEquals("sudo systemctl poweroff", DEFAULT_POWEROFF_COMMAND)
+        assertEquals("echo bye", base.copy(poweroffCommand = "echo bye").effectivePoweroffCommand())
     }
 
     @Test

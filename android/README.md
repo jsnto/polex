@@ -20,8 +20,9 @@ screen widget.
   **power** button (a stroke-style power symbol — open circle with a
   vertical line, from `res/drawable/ic_power.xml` — tinted by status: green
   when online, red when offline). The button is a toggle driven by the
-  server's current state: **online → power off** (a clean `sudo systemctl
-  poweroff` over SSH, dimmed when the server has no SSH power-off
+  server's current state: **online → power off** (the server's power off
+  command — default a clean `sudo systemctl poweroff` — over SSH, dimmed
+  when the server has no SSH power-off
   configured) and **offline → power on** (a Wake-on-LAN packet, dimmed when
   no MAC is configured) — each asks for confirmation in a dialog ("Power off
   <server>?" / "Send wake to <server>?") before POSTing
@@ -31,7 +32,7 @@ screen widget.
   (`ServerDetailScreen`) with live status and its settings.
 - **Server detail** — the page a card links to: live status (online/latency,
   last checked, last wake, last shutdown), the configured settings (IP, MAC,
-  check method, SSH user/key/password), the same power toggle, and an
+  check method, SSH user/key/password, power off command), the same power toggle, and an
   **Edit settings** button that
   reuses the settings' add/edit form. System back returns to the dashboard
   (or out of the edit form), not out of the app.
@@ -47,7 +48,10 @@ screen widget.
     the user plus a key path and/or a password; the key file (if used) must
     exist on the machine running the backend and the key is tried first
     (a rejected key — or a key file that fails to load — falls back to the
-    password when one is set).
+    password when one is set). The **Power off command** field (optional)
+    sets the exact command sent over SSH when powering the server off;
+    leave it empty for the default `sudo systemctl poweroff` (it only
+    applies when the SSH power-off is enabled).
 - **Home screen widget** (Glance) — at-a-glance list of all servers
   (dot + name + `12ms`/`off`). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
@@ -117,7 +121,9 @@ produces the APK under `app/build/outputs/apk/`).
    instead of a TCP port connect. Set the **SSH user** field plus an **SSH
    key path** and/or an **SSH password** to enable the power-off direction;
    the key (if used) is a file on the backend host, and the path + password
-   are all that gets stored.
+   are all that gets stored. The **Power off command** field sets the exact
+   command sent over SSH when powering the server off (leave it empty for
+   the default `sudo systemctl poweroff`).
 
 ## Add the widget
 

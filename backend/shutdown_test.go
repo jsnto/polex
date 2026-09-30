@@ -26,13 +26,21 @@ const testPassword = "secret"
 // ---------- pure helpers ----------
 
 func TestNormalizeSSHFields(t *testing.T) {
-	// All three set: accepted and trimmed.
-	sv := Server{Name: "NAS", IP: "192.168.1.10", SshUser: "  root  ", SshKeyPath: "  ~/keys/polex  ", SshPassword: "  s3cret  "}
+	// All SSH fields set: accepted and trimmed (poweroff command included).
+	sv := Server{Name: "NAS", IP: "192.168.1.10", SshUser: "  root  ", SshKeyPath: "  ~/keys/polex  ", SshPassword: "  s3cret  ", PoweroffCommand: "  sudo shutdown -h now  "}
 	if err := normalize(&sv); err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	if sv.SshUser != "root" || sv.SshKeyPath != "~/keys/polex" || sv.SshPassword != "s3cret" {
-		t.Fatalf("ssh fields not trimmed: %q %q %q", sv.SshUser, sv.SshKeyPath, sv.SshPassword)
+	if sv.SshUser != "root" || sv.SshKeyPath != "~/keys/polex" || sv.SshPassword != "s3cret" || sv.PoweroffCommand != "sudo shutdown -h now" {
+		t.Fatalf("ssh fields not trimmed: %q %q %q %q", sv.SshUser, sv.SshKeyPath, sv.SshPassword, sv.PoweroffCommand)
+	}
+
+	// Poweroff command without SSH credentials: accepted (it is the
+	// command override, not a credential) — power-off stays disabled by
+	// the user+credential rule below.
+	sv = Server{Name: "NAS", IP: "192.168.1.10", PoweroffCommand: "shutdown -h now"}
+	if err := normalize(&sv); err != nil {
+		t.Fatalf("normalize (poweroff command only): %v", err)
 	}
 
 	// User + password only (no key): accepted.
@@ -103,6 +111,16 @@ func TestShutdownTarget(t *testing.T) {
 	sshPort = 2222
 	if got := shutdownTarget("192.168.1.10"); got != "192.168.1.10:2222" {
 		t.Errorf("shutdownTarget = %q", got)
+	}
+}
+
+func TestPoweroffCommandFor(t *testing.T) {
+	// Empty/unset → the default; a set value → sent verbatim.
+	if got := poweroffCommandFor(""); got != shutdownCommand {
+		t.Errorf("poweroffCommandFor(\"\") = %q, want the default %q", got, shutdownCommand)
+	}
+	if got := poweroffCommandFor("shutdown -h now"); got != "shutdown -h now" {
+		t.Errorf("poweroffCommandFor(override) = %q, want the override verbatim", got)
 	}
 }
 
@@ -897,5 +915,61 @@ func TestShutdownHandlerSlowConfirm(t *testing.T) {
 	}
 	if got := rec.execCommand.Load(); got != "sudo systemctl poweroff" {
 		t.Fatalf("started command = %q, want %q", got, "sudo systemctl poweroff")
+	}
+}
+
+// TestShutdownHandlerPoweroffCommand: the per-server poweroffCommand field
+// is sent verbatim over the wire when set, and an empty field sends the
+// default. The field also rides in GET /api/status.
+func TestShutdownHandlerPoweroffCommand(t *testing.T) {
+	keyFile := genTestKey(t, t.TempDir())
+	port, rec := fakeSSHServer(t, "ok")
+	oldPort := sshPort
+	sshPort = port
+	defer func() { sshPort = oldPort }()
+
+	srv := Server{ID: 1, Name: "NAS", IP: "127.0.0.1", Port: 22, Check: "tcp",
+		SshUser: "root", SshKeyPath: keyFile}
+	r, st := newTestBackend(t, srv)
+
+	// Empty field: the default command goes over the wire, and the field
+	// shows up (empty) in /api/status.
+	w := doShutdown(t, r)
+	var resp shutdownResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("ok = false (body %s)", w.Body.String())
+	}
+	if got := rec.execCommand.Load(); got != shutdownCommand {
+		t.Fatalf("started command = %q, want the default %q", got, shutdownCommand)
+	}
+	items := doStatus(t, r)
+	if len(items) != 1 || items[0].PoweroffCommand != "" {
+		t.Fatalf("status poweroffCommand before = %+v, want empty", items)
+	}
+
+	// Explicit field: exactly that command goes over the wire.
+	override := "echo polex poweroff"
+	st.mu.Lock()
+	st.servers[0].PoweroffCommand = override
+	st.mu.Unlock()
+	w = doShutdown(t, r)
+	resp = shutdownResp{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("ok = false (body %s)", w.Body.String())
+	}
+	if got := rec.execCommand.Load(); got != override {
+		t.Fatalf("started command = %q, want the explicit %q", got, override)
+	}
+
+	// And the value is visible in /api/status.
+	items = doStatus(t, r)
+	if items[0].PoweroffCommand != override {
+		t.Fatalf("status poweroffCommand = %q, want %q", items[0].PoweroffCommand, override)
 	}
 }

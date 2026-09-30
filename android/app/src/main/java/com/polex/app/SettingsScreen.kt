@@ -531,6 +531,7 @@ fun EditServerScreen(
     var sshUser by remember { mutableStateOf(server?.sshUser ?: "") }
     var sshKeyPath by remember { mutableStateOf(server?.sshKeyPath ?: "") }
     var sshPassword by remember { mutableStateOf(server?.sshPassword ?: "") }
+    var poweroffCommand by remember { mutableStateOf(server?.poweroffCommand ?: "") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
@@ -541,7 +542,7 @@ fun EditServerScreen(
         scope.launch {
             val json = serverToJson(
                 name, ip, mac, port.toIntOrNull() ?: 22, if (usePing) "ping" else "tcp",
-                sshUser.trim(), sshKeyPath.trim(), sshPassword.trim(),
+                sshUser.trim(), sshKeyPath.trim(), sshPassword.trim(), poweroffCommand.trim(),
             )
             val result = Api.safe {
                 if (isNew || server == null) {
@@ -648,8 +649,15 @@ fun EditServerScreen(
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    OutlinedTextField(
+                        value = poweroffCommand,
+                        onValueChange = { poweroffCommand = it },
+                        label = { Text("Power off command (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Text(
-                        "Power off over SSH: set the SSH user plus a key path and/or password to enable it (online server) — the key is tried first; a rejected key, or a key file that fails to load, falls back to the password when one is set. The key file (if used) must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave the user empty to disable power-off.",
+                        "Power off over SSH: set the SSH user plus a key path and/or password to enable it (online server) — the key is tried first; a rejected key, or a key file that fails to load, falls back to the password when one is set. The key file (if used) must exist on the machine running the backend (a path like ~/keys/polex, or /app/keys/polex inside the Docker container). Leave the user empty to disable power-off. The power off command field sets the exact command run over SSH when powering off; leave it empty for the default (sudo systemctl poweroff) — it only applies when power-off is enabled.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

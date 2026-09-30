@@ -170,7 +170,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     if (editing) {
         EditServerScreen(
             server = status?.let {
-                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath, it.sshPassword)
+                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath, it.sshPassword, it.poweroffCommand)
             },
             isNew = false,
             onBack = {
@@ -293,6 +293,9 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                                 "not set (power off off)"
                             },
                         )
+                        if (s.sshConfigured()) {
+                            DetailRow("Power off", "sends ${s.effectivePoweroffCommand()} over SSH")
+                        }
                         OutlinedButton(onClick = { editing = true }) {
                             Text("Edit settings")
                         }
@@ -319,7 +322,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                 Text(
                     when {
                         s.online && s.sshConfigured() ->
-                            "A clean shutdown (sudo systemctl poweroff) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
+                            "The power off command (${s.effectivePoweroffCommand()}) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
                         s.online ->
                             "This server has no SSH power-off configured (SSH user plus a key path and/or password), so it cannot be powered off from the app."
                         s.mac.isNotEmpty() ->
