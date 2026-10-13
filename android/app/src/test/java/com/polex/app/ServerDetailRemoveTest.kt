@@ -30,9 +30,14 @@ import org.robolectric.annotation.Config
  * The screen code under test is the production code: the button, the dialog,
  * [Api.delete], and the success/401/error branches of `removeServer`.
  * (The backend itself is exercised separately against the real Go binary.)
+ *
+ * [TestApplication] (via `@Config(application=...)`) registers the
+ * test-only [TestDetailActivity] host with Robolectric's ShadowPackageManager;
+ * the activity class itself lives in the unit-test source set and is not in
+ * the production manifest.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = TestApplication::class)
 class ServerDetailRemoveTest {
 
     @get:Rule
