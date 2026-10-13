@@ -52,8 +52,9 @@ screen widget.
     sets the exact command sent over SSH when powering the server off;
     leave it empty for the default `sudo systemctl poweroff` (it only
     applies when the SSH power-off is enabled).
-- **Home screen widget** (Glance) — at-a-glance list of all servers
-  (dot + name + `12ms`/`off`). Refreshed in the background roughly every
+- **Home screen widget** (Glance) — at-a-glance 1×1 tile: a colored
+  `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid of
+  servers (offline shown in red). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
   WorkManager, since the system may defer WorkManager periodic work) and
   on every in-app status refresh.
@@ -131,9 +132,10 @@ Long-press the home screen → **Widgets** → **PoleX** → drag to the home
 screen. It appears empty until the first background refresh succeeds or you
 open the app once (the app refreshes the widget on every status poll).
 
-The widget lists each server (green/red dot + name + latency) and shows
-the up count and data-freshness time on a single bottom line
-("2/3 up · updated 14:32") and **tapping it opens the app**.
+The widget is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+time under it ("updated 14:32"), then a two-column grid of servers
+(green/red dot + name; offline servers shown in red, `+N more` for what
+doesn't fit). **Tapping it opens the app**.
 
 **Windows:** see `../scripts/windows/build-apk.ps1` and
 `../scripts/windows/test-emulator.ps1` (Docker Desktop).

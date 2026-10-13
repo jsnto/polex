@@ -36,10 +36,9 @@ Home-lab server status + Wake-on-LAN, from your phone.
     highlighted in amber with a one-line note — an unreachable backend shows
     "unreachable" and is **not** treated as a mismatch (comparison helpers:
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
-  - a **home screen widget** (Glance) — a compact panel listing each server
-    (green/red dot + name + latency) with the up count and data-freshness
-    time on a single bottom line ("2/3 up · updated HH:mm"); tapping it
-    opens the app. A background job (WorkManager + an inexact alarm,
+  - a **home screen widget** (Glance) — a compact 1×1 tile: a colored
+    `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
+    (offline servers in red, `+N more` overflow); tapping it opens the app. A background job (WorkManager + an inexact alarm,
     since the system may defer WorkManager periodic work) refreshes the
     widget roughly every 15 minutes, and the widget also refreshes
     whenever the app polls status.
