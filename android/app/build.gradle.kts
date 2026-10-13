@@ -38,6 +38,12 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
+
+    testOptions {
+        // Compose UI tests run on the JVM via Robolectric (no device needed);
+        // they need the app's merged resources on the unit-test classpath.
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 // Name APKs after the project, not the module: polex-debug.apk / polex-release.apk
@@ -77,4 +83,11 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     // Real org.json for the JVM unit tests (the platform copy is a stub there).
     testImplementation("org.json:json:20240303")
+
+    // Compose UI tests on the JVM (Robolectric): drives the real screens with
+    // real clicks; see ServerDetailRemoveTest.
+    testImplementation(platform("androidx.compose:compose-bom:2024.09.02"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("org.robolectric:robolectric:4.13")
 }

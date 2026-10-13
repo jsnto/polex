@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +64,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     // command being sent).
     var powerBusy by remember { mutableStateOf(false) }
     var powerConfirm by remember { mutableStateOf(false) }
+    var removeConfirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     // Disconnected state (connection-level fetch failure, code -1): shows
     // the same dedicated full-screen page as the dashboard; the
@@ -163,6 +165,21 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                     else -> "WOL failed: ${result.body}"
                 }
             )
+        }
+    }
+
+    /** Remove the server through the same endpoint the settings list uses.
+     *  On success, back to the dashboard — the server no longer exists, so
+     *  there is no in-page state to refresh; on failure, stay on the page
+     *  and surface the error like the other reachable-backend errors here. */
+    fun removeServer(s: SrvStatus) {
+        scope.launch {
+            val result = Api.safe { Api.delete("${Api.base(context)}/api/servers/${s.id}") }
+            when {
+                result.code in 200..299 -> onBack()
+                Disconnect.requiresReauth(result.code) -> onAuthError()
+                else -> error = "Remove failed: ${result.body}"
+            }
         }
     }
 
@@ -296,8 +313,20 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                         if (s.sshConfigured()) {
                             DetailRow("Power off", "sends ${s.effectivePoweroffCommand()} over SSH")
                         }
-                        OutlinedButton(onClick = { editing = true }) {
-                            Text("Edit settings")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { editing = true }) {
+                                Text("Edit settings")
+                            }
+                            // Destructive, like the app's other destructive
+                            // affordances (OfflineRed).
+                            OutlinedButton(
+                                onClick = { removeConfirm = true },
+                                // Also tints the border, which follows
+                                // contentColor.
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = OfflineRed),
+                            ) {
+                                Text("Remove server")
+                            }
                         }
                     }
                 }
@@ -345,6 +374,28 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
             },
             dismissButton = {
                 TextButton(onClick = { powerConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Remove confirmation dialog, same style as the server list's
+    // "Delete server?" dialog; confirm calls the same DELETE endpoint.
+    val removeTarget = if (removeConfirm) status else null
+    removeTarget?.let { s ->
+        AlertDialog(
+            onDismissRequest = { removeConfirm = false },
+            title = { Text("Delete server?") },
+            text = { Text("\"${s.name}\" (${s.ip}) will be removed.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeConfirm = false
+                    removeServer(s)
+                }) {
+                    Text("Delete", color = OfflineRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeConfirm = false }) { Text("Cancel") }
             },
         )
     }

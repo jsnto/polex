@@ -32,9 +32,12 @@ screen widget.
   (`ServerDetailScreen`) with live status and its settings.
 - **Server detail** — the page a card links to: live status (online/latency,
   last checked, last wake, last shutdown), the configured settings (IP, MAC,
-  check method, SSH user/key/password, power off command), the same power toggle, and an
+  check method, SSH user/key/password, power off command), the same power toggle, an
   **Edit settings** button that
-  reuses the settings' add/edit form. System back returns to the dashboard
+  reuses the settings' add/edit form, and a destructive **Remove server** button that
+  opens the same "Delete server?" confirm dialog as the settings list and removes the
+  server via `DELETE /api/servers/:id` (on success it returns to the dashboard;
+  on failure the error is shown inline). System back returns to the dashboard
   (or out of the edit form), not out of the app.
 - **Settings** — minimal menu (Backend / Servers / Log out):
   - **Backend** — change the backend URL;
