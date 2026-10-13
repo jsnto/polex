@@ -76,10 +76,11 @@ class ServerWidget : GlanceAppWidget() {
         private const val MAX_GRID_CELLS = 6
 
         // Tight row heights (see class KDoc). Sized to the 8/10/16 sp type:
-        // ~1.1× the font size, so glyphs (≈0.9× font size span) stay inside.
+        // ≈1.2× the font size, so the glyph span (≈0.9×) and its descenders
+        // stay inside the row.
         private val heroHeight = 18.dp
-        private val freshHeight = 9.dp
-        private val cellHeight = 11.dp
+        private val freshHeight = 10.dp
+        private val cellHeight = 12.dp
 
         /** Refreshes all installed widget instances (call from the app/worker). */
         suspend fun refreshAll(context: Context) {
@@ -121,7 +122,6 @@ class ServerWidget : GlanceAppWidget() {
                     // Whole widget is tappable → opens the app.
                     .clickable(onClick = actionStartActivity(Intent(context, MainActivity::class.java)))
                     .padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (items.isEmpty()) {
                     Text(
