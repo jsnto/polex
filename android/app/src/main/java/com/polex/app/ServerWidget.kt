@@ -67,8 +67,8 @@ private val DotRed = Color(0xFFF44336)
  *    servers (a "+N" line for the rest), the app shows the full list.
  *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
  *    space between cells, it can't cap name width), so the two cells anchor
- *    left/right with a filling spacer between them (option B's "centered
- *    spacer" cell shape); the app shows the full, aligned list.
+ *    left/right with a filling spacer between them; the app shows the full,
+ *    aligned list.
  */
 class ServerWidget : GlanceAppWidget() {
 
