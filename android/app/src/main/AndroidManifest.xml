@@ -21,6 +21,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Test-only host activity for the Robolectric Compose UI tests
+             (ServerDetailRemoveTest); never launched by the app itself. -->
+        <activity
+            android:name=".TestDetailActivity"
+            android:exported="false" />
+
         <receiver
             android:name=".ServerWidgetProvider"
             android:exported="true">
