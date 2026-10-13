@@ -280,9 +280,10 @@ adb install android/apk/polex-debug.apk
 ### Widget
 
 Long-press the home screen → Widgets → **PoleX** → drag it onto the home
-screen. It lists each server (green/red dot + name + latency) and shows
-the up count and data-freshness time on a single bottom line
-("2/3 up · updated 14:32"). **Tapping it opens the
+screen. It is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+time under it ("updated 14:32"), then a two-column grid of servers
+(green/red dot + name; offline servers shown in red, `+N more` for what
+doesn't fit). **Tapping it opens the
 app**. It refreshes roughly every 15 minutes in the background (a
 self-rescheduling inexact alarm + a WorkManager job, because the system
 can defer WorkManager's periodic work) and on every app status refresh
