@@ -65,15 +65,19 @@ private val DotRed = Color(0xFFF44336)
  *  - Column allows at most 10 children: hero (1) + freshness (1) + 3 grid
  *    rows + overflow (1) = at most 6; the grid shows at most [MAX_GRID_CELLS]
  *    servers (a "+N" line for the rest), the app shows the full list.
- *  - Glance 1.1.0 `RowScope` has no `weight`, so the two cells anchor left/
- *    right with a filling spacer between them (option B's "centered spacer"
- *    cell shape); the app shows the full, aligned list.
+ *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
+ *    space between cells, it can't cap name width), so the two cells anchor
+ *    left/right with a filling spacer between them (option B's "centered
+ *    spacer" cell shape); the app shows the full, aligned list.
  */
 class ServerWidget : GlanceAppWidget() {
 
     companion object {
         /** 1×1 budget: hero + a two-column grid of up to 6 servers (3 rows). */
         private const val MAX_GRID_CELLS = 6
+
+        /** Visible grid cell name chars before the "…" (10sp Medium, half-cell width). */
+        private const val CELL_NAME_MAX = 4
 
         // Tight row heights (see class KDoc). Sized to the 8/10/16 sp type:
         // ≈1.2× the font size, so the glyph span (≈0.9×) and its descenders
@@ -179,7 +183,7 @@ class ServerWidget : GlanceAppWidget() {
         }
     }
 
-    /** One grid cell: colored dot + name; offline styled red (no `off` label at 1×1). */
+    /** One grid cell: colored dot + truncated name; offline styled red (no `off` label at 1×1). */
     @Composable
     private fun RowScope.cell(s: SrvStatus) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -192,7 +196,7 @@ class ServerWidget : GlanceAppWidget() {
             )
             Spacer(GlanceModifier.width(3.dp))
             Text(
-                text = s.name,
+                text = cellName(s.name),
                 style = TextStyle(
                     color = ColorProvider(if (s.online) TextPrimary else DotRed),
                     fontWeight = FontWeight.Medium,
@@ -202,6 +206,9 @@ class ServerWidget : GlanceAppWidget() {
             )
         }
     }
+
+    private fun cellName(name: String): String =
+        if (name.length <= CELL_NAME_MAX) name else name.take(CELL_NAME_MAX) + "…"
 
     private fun timeOfDay(epochMillis: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))
