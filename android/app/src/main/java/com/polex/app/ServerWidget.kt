@@ -59,7 +59,7 @@ private val DotRed = Color(0xFFF44336)
  *    constrained vertically, so the Column advances by the tight height
  *    instead of the full line box (glyphs stay clear: the line-box padding
  *    that would collide overflows instead of pushing the next row down).
- *    Worst-case content is ≈68 dp in the ≈89 dp 1×1 cell.
+ *    Worst-case content is ≈82 dp in the ≈89 dp 1×1 cell.
  *
  * Glance notes:
  *  - Column allows at most 10 children: hero (1) + freshness (1) + 3 grid
