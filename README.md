@@ -36,13 +36,13 @@ Home-lab server status + Wake-on-LAN, from your phone.
     highlighted in amber with a one-line note — an unreachable backend shows
     "unreachable" and is **not** treated as a mismatch (comparison helpers:
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
-  - a **home screen widget** (Glance) — a compact panel listing each server
-    (green/red dot + name + latency) with the up count and data-freshness
-    time on a single bottom line ("2/3 up · updated HH:mm"); tapping it
-    opens the app. A background job (WorkManager + an inexact alarm,
-    since the system may defer WorkManager periodic work) refreshes the
-    widget roughly every 15 minutes, and the widget also refreshes
-    whenever the app polls status.
+  - a **home screen widget** (Glance) — a compact 1×1 tile: a colored
+    `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
+    (offline servers in red, `+N more` overflow); tapping it opens the
+    app. A background job (WorkManager + an inexact alarm, since the
+    system may defer WorkManager periodic work) refreshes the widget
+    roughly every 15 minutes, and the widget also refreshes whenever
+    the app polls status.
 
 ## Quick start
 
@@ -281,9 +281,10 @@ adb install android/apk/polex-debug.apk
 ### Widget
 
 Long-press the home screen → Widgets → **PoleX** → drag it onto the home
-screen. It lists each server (green/red dot + name + latency) and shows
-the up count and data-freshness time on a single bottom line
-("2/3 up · updated 14:32"). **Tapping it opens the
+screen. It is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+time under it ("updated 14:32"), then a two-column grid of servers
+(green/red dot + name; offline servers shown in red, `+N more` for what
+doesn't fit). **Tapping it opens the
 app**. It refreshes roughly every 15 minutes in the background (a
 self-rescheduling inexact alarm + a WorkManager job, because the system
 can defer WorkManager's periodic work) and on every app status refresh
