@@ -38,10 +38,11 @@ Home-lab server status + Wake-on-LAN, from your phone.
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
   - a **home screen widget** (Glance) — a compact 1×1 tile: a colored
     `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
-    (offline servers in red, `+N more` overflow); tapping it opens the app. A background job (WorkManager + an inexact alarm,
-    since the system may defer WorkManager periodic work) refreshes the
-    widget roughly every 15 minutes, and the widget also refreshes
-    whenever the app polls status.
+    (offline servers in red, `+N more` overflow); tapping it opens the
+    app. A background job (WorkManager + an inexact alarm, since the
+    system may defer WorkManager periodic work) refreshes the widget
+    roughly every 15 minutes, and the widget also refreshes whenever
+    the app polls status.
 
 ## Quick start
 
