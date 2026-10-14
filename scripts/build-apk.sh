@@ -61,8 +61,11 @@ build_docker() {
     fi
     echo "==> Source verified in image (md5 ${host_src:0:12}...)"
 
-    # 5) Build from the verified image.
-    TASKS="$tasks" docker compose up apk
+    # 5) Build from the verified image. --exit-code-from propagates a
+    #    failed gradle run to this script (plain `up` exits 0 even when
+    #    the container build fails, which would ship an empty dist/ as
+    #    "success").
+    TASKS="$tasks" docker compose up --exit-code-from apk apk
 }
 
 build_local() {

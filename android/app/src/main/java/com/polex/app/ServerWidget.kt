@@ -12,6 +12,7 @@ import androidx.glance.GlanceModifier
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
@@ -51,9 +52,13 @@ private val DotRed = Color(0xFFF44336)
  * each grid row is two equal `defaultWeight` halves (instead of the old
  * left/right anchors), so the same halves are tight at 1×1 and widen with
  * the 2×1 span. The name budget follows the placed span — the instance
- * options carry `cellX` once the launcher places/resizes it (API 31+,
- * absent on pre-31 and before first placement → the 1-wide budget):
- * [CELL_NAME_MAX] at 1 wide, [CELL_NAME_MAX_WIDE] at 2 wide.
+ * options carry the `cellX` key once the launcher places/resizes the
+ * widget (API 31+ platform options key; the AppWidgetManager constant is
+ * @SystemApi, so the key is a literal; absent on pre-31 and before first
+ * placement → the 1-wide budget): [CELL_NAME_MAX] at 1 wide,
+ * [CELL_NAME_MAX_WIDE] at 2 wide. Read via the `LocalAppWidgetOptions`
+ * composition local (Glance 1.1.0), which also makes the re-render on
+ * stretch work: the Glance receiver re-renders on option changes.
  *
  * Tight rows — how the padding between rows is fixed:
  *  - Glance 1.1.0's `Text`/`TextStyle` exposes **no `lineHeight`** and the
@@ -115,17 +120,6 @@ class ServerWidget : GlanceAppWidget() {
         val shown = items.take(MAX_GRID_CELLS)
         val hidden = items.size - shown.size
 
-        // Placed span: cellX lands in the instance options when the
-        // launcher places/resizes the widget (API 31+); absent → 1-wide
-        // budget (pre-31 launchers and pre-first-placement renders). The
-        // Glance receiver re-renders on option changes, so stretching a
-        // placed 1×1 to 2×1 picks the wider budget on the next render.
-        val options = runCatching {
-            AppWidgetManager.getInstance(context).getAppWidgetOptions(id.asInt())
-        }.getOrNull()
-        val cellX = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_CELL_X) ?: 1
-        val nameMax = if (cellX >= 2) CELL_NAME_MAX_WIDE else CELL_NAME_MAX
-
         // Colored by the up/down verdict (green all-up, red otherwise).
         val verdictColor = ColorProvider(if (allUp) DotGreen else DotRed)
         val heroCountStyle = TextStyle(
@@ -143,6 +137,12 @@ class ServerWidget : GlanceAppWidget() {
         val dimStyle = TextStyle(color = ColorProvider(TextDim), fontSize = 10.sp)
 
         provideContent {
+            // Placed span from the instance options (the platform writes
+            // the `cellX` key once the launcher places/resizes the widget;
+            // absent → the 1-wide budget). Absent until first placement,
+            // and on pre-31 launchers.
+            val cellX = LocalAppWidgetOptions.current?.getInt("cellX", 1) ?: 1
+            val nameMax = if (cellX >= 2) CELL_NAME_MAX_WIDE else CELL_NAME_MAX
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
@@ -193,11 +193,11 @@ class ServerWidget : GlanceAppWidget() {
                                 .height(cellHeight),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(GlanceModifier.defaultWeight(1f)) {
+                            Column(GlanceModifier.defaultWeight()) {
                                 cell(pair.first(), nameMax)
                             }
                             if (pair.size > 1) {
-                                Column(GlanceModifier.defaultWeight(1f)) {
+                                Column(GlanceModifier.defaultWeight()) {
                                     cell(pair.last(), nameMax)
                                 }
                             }
