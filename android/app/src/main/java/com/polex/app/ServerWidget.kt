@@ -12,7 +12,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
-import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
@@ -51,14 +50,11 @@ private val DotRed = Color(0xFFF44336)
  * The grid reflows across the wider 2×1 cell with no layout branching:
  * each grid row is two equal `defaultWeight` halves (instead of the old
  * left/right anchors), so the same halves are tight at 1×1 and widen with
- * the 2×1 span. The name budget follows the placed span — the instance
- * options carry the `cellX` key once the launcher places/resizes the
- * widget (API 31+ platform options key; the AppWidgetManager constant is
- * @SystemApi, so the key is a literal; absent on pre-31 and before first
- * placement → the 1-wide budget): [CELL_NAME_MAX] at 1 wide,
- * [CELL_NAME_MAX_WIDE] at 2 wide. Read via the `LocalAppWidgetOptions`
- * composition local (Glance 1.1.0), which also makes the re-render on
- * stretch work: the Glance receiver re-renders on option changes.
+ * the 2×1 span. The name budget is always [CELL_NAME_MAX] (4 chars) at
+ * both sizes: the launcher instance options carry the cell POSITION
+ * (`cellX`, the 0-based column of the widget's top-left corner), not its
+ * span, so a span-based budget can't be read from the stable options API
+ * — the narrow budget is the only one guaranteed to fit every placement.
  *
  * Tight rows — how the padding between rows is fixed:
  *  - Glance 1.1.0's `Text`/`TextStyle` exposes **no `lineHeight`** and the
@@ -93,9 +89,6 @@ class ServerWidget : GlanceAppWidget() {
 
         /** Visible grid cell name chars before the "…" (10sp Medium, 1×1 half-cell width). */
         private const val CELL_NAME_MAX = 4
-
-        /** Same budget at 2 wide: the half-cell is ≈2× wider (10sp Medium, 2×1 half-cell). */
-        private const val CELL_NAME_MAX_WIDE = 12
 
         // Tight row heights (see class KDoc). Sized to the 8/10/16 sp type:
         // ≈1.2× the font size, so the glyph span (≈0.9×) and its descenders
@@ -137,12 +130,6 @@ class ServerWidget : GlanceAppWidget() {
         val dimStyle = TextStyle(color = ColorProvider(TextDim), fontSize = 10.sp)
 
         provideContent {
-            // Placed span from the instance options (the platform writes
-            // the `cellX` key once the launcher places/resizes the widget;
-            // absent → the 1-wide budget). Absent until first placement,
-            // and on pre-31 launchers.
-            val cellX = LocalAppWidgetOptions.current?.getInt("cellX", 1) ?: 1
-            val nameMax = if (cellX >= 2) CELL_NAME_MAX_WIDE else CELL_NAME_MAX
             Column(
                 modifier = GlanceModifier
                     .fillMaxSize()
@@ -194,11 +181,11 @@ class ServerWidget : GlanceAppWidget() {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(GlanceModifier.defaultWeight()) {
-                                cell(pair.first(), nameMax)
+                                cell(pair.first())
                             }
                             if (pair.size > 1) {
                                 Column(GlanceModifier.defaultWeight()) {
-                                    cell(pair.last(), nameMax)
+                                    cell(pair.last())
                                 }
                             }
                         }
@@ -217,7 +204,7 @@ class ServerWidget : GlanceAppWidget() {
 
     /** One grid cell: colored dot + truncated name; offline styled red (no `off` label at 1×1). */
     @Composable
-    private fun RowScope.cell(s: SrvStatus, nameMax: Int) {
+    private fun RowScope.cell(s: SrvStatus) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "●",
@@ -228,7 +215,7 @@ class ServerWidget : GlanceAppWidget() {
             )
             Spacer(GlanceModifier.width(3.dp))
             Text(
-                text = cellName(s.name, nameMax),
+                text = cellName(s.name, CELL_NAME_MAX),
                 style = TextStyle(
                     color = ColorProvider(if (s.online) TextPrimary else DotRed),
                     fontWeight = FontWeight.Medium,
