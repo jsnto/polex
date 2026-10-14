@@ -6,7 +6,7 @@ import org.robolectric.Shadows
 import org.robolectric.shadows.ShadowPackageManager
 
 /**
- * Test-only [Application] for the Compose UI tests ([ServerDetailRemoveTest]).
+ * Test-only [Application] for the Compose UI tests ([EditServerRemoveTest]).
  *
  * Robolectric loads the app's MERGED (production) manifest, and
  * [TestDetailActivity] exists only in the unit-test source set, so it never
