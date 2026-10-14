@@ -57,7 +57,8 @@ screen widget.
     **Remove server** button: the same "Delete server?" confirm dialog as
     the settings list, removing the server via `DELETE /api/servers/:id`
     (on success it navigates back — to the dashboard when reached from the
-    server detail page; on failure the error is shown inline).
+    server detail page; on failure a "Remove failed" dialog is shown and
+    the error is also kept as the inline message under the form).
 - **Home screen widget** (Glance) — at-a-glance 1×1 or 2×1 (2 wide,
   1 tall) tile: a colored
   `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid of

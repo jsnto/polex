@@ -280,6 +280,15 @@ class EditServerRemoveTest {
         openEditForm()
         openRemoveDialog()
         clickDialogButton("Delete", "DELETE accepted (dialog closed)")
+        // The failure is also surfaced as an error dialog (on device the
+        // inline text below did not reliably render in the form).
+        waitFor("error dialog appears") {
+            compose.onNodeWithText("Remove failed").assertIsDisplayed()
+        }
+        waitFor("error dialog dismissed (OK keeps the inline message)") {
+            compose.onNodeWithText("OK").performClick()
+            compose.onNodeWithText("Remove failed").assertDoesNotExist()
+        }
         // The inline error renders at the bottom of the (tall) form — below
         // the fold in the small test window — so scroll it into view.
         compose.onNodeWithText("Remove failed:", substring = true).performScrollTo()

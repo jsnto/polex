@@ -516,6 +516,20 @@ fun ServersScreen(
 }
 
 /**
+ * Pulls the human-readable `error` field out of a backend error body
+ * (`{"error":"..."}`); falls back to the raw body when it is not JSON or
+ * carries no error field. Keeps UI strings plain text — raw JSON in a
+ * message string broke accessibility text on device (the node rendered but
+ * reported an empty label).
+ */
+private fun friendlyError(body: String): String =
+    try {
+        org.json.JSONObject(body).optString("error").ifEmpty { body }
+    } catch (_: Exception) {
+        body
+    }
+
+/**
  * New-server / edit-server form (POST or PUT /api/servers).
  *
  * Editing an existing server also carries the destructive remove-server
@@ -548,6 +562,11 @@ fun EditServerScreen(
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var removeConfirm by remember { mutableStateOf(false) }
+    // A failed remove is also surfaced as a dialog: the dialog surface is
+    // guaranteed visible even when the form's bottom (where the inline
+    // message sits) is off-screen or scrolled out. Dismissing it keeps the
+    // inline message.
+    var removeError by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
         if (busy) return
@@ -592,7 +611,11 @@ fun EditServerScreen(
                 // evaluate to a function value and never call it).
                 result.code in 200..299 -> (onDeleted ?: onBack)()
                 Disconnect.requiresReauth(result.code) -> onAuthError?.invoke()
-                else -> message = "Remove failed: ${result.body}"
+                else -> {
+                    val detail = friendlyError(result.body)
+                    message = "Remove failed: $detail"
+                    removeError = detail
+                }
             }
         }
     }
@@ -769,6 +792,16 @@ fun EditServerScreen(
             },
             dismissButton = {
                 TextButton(onClick = { removeConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+    removeError?.let { detail ->
+        AlertDialog(
+            onDismissRequest = { removeError = null },
+            title = { Text("Remove failed") },
+            text = { Text("The server could not be removed: $detail") },
+            confirmButton = {
+                TextButton(onClick = { removeError = null }) { Text("OK") }
             },
         )
     }
