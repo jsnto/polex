@@ -40,7 +40,7 @@ for arg in "$@"; do
 done
 
 cleanup() {
-    if [ $KEEP -eq 1 ]; then return; fi
+    if [ "$KEEP" -eq 1 ]; then return; fi
     echo "==> Tearing down"
     docker compose -f "$COMPOSE" down --remove-orphans >/dev/null 2>&1 || true
     if [ -n "${BACKEND_PID:-}" ]; then

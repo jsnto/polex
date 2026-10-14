@@ -538,7 +538,7 @@ private fun friendlyError(body: String): String =
  * button moved here): "Remove server" → "Delete server?" confirm dialog →
  * `DELETE /api/servers/:id`. On success it navigates away ([onDeleted] when
  * provided, else [onBack]); on failure the error is shown inline like the
- * form's save errors.
+ * form's save errors, plus a dismissible "Remove failed" dialog.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -598,7 +598,8 @@ fun EditServerScreen(
      *  On success, navigate away ([onDeleted] when provided — e.g. the
      *  detail page returns to the dashboard, since the server no longer
      *  exists — else [onBack]); on failure, stay on the form and surface
-     *  the error inline like the save errors. */
+     *  the error inline like the save errors, plus the "Remove failed"
+     *  dialog. */
     fun removeServer() {
         val s = server ?: return
         if (busy) return

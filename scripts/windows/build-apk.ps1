@@ -6,7 +6,7 @@
 .DESCRIPTION
     Wraps `docker compose up --build apk` from android/docker-compose.yml.
     Docker Desktop for Windows is required. No local JDK/Android SDK needed.
-    APKs land in android\dist\..
+    APKs land in android\dist.
 
 .PARAMETER Task
     debug (default) or release.
