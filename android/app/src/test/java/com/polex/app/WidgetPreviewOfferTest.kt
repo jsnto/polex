@@ -26,8 +26,8 @@ import org.robolectric.annotation.Config
  *  - [widgetInfoDeclaresThe1x1And2x1Offer] — the widget metadata XML is the
  *    machine-consumed artifact the launcher reads to decide what sizes to
  *    offer. Parsed into a typed model (attributes resolved with unit
- *    conversion), it must declare: min 80×80dp, max 190×80dp, min/max
- *    resize 80×190dp×80dp, resizeMode horizontal ONLY (no vertical stretch,
+ *    conversion), it must declare: min 80×80dp, max 190×80dp, minResize
+ *    80×80dp, maxResize 190×80dp, resizeMode horizontal ONLY (no vertical stretch,
  *    so the offer is 1×1 and 2×1 only), target cell 1×1, and the preview /
  *    initial layout pointing at `widget_preview`. 190dp is the 2-wide cap:
  *    on the Pixel 7 Pro's ≈121dp cell pitch a 2-wide offer needs
