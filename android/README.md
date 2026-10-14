@@ -141,8 +141,8 @@ screen. It appears empty until the first background refresh succeeds or you
 open the app once (the app refreshes the widget on every status poll).
 
 The widget is offered at 1×1 (the default placement size) and 2×1 (2 wide,
-1 tall — the grid's two columns widen across the extra cell and the server
-names show more characters). It is a colored `N/M UP` hero with the
+1 tall — the grid's two columns widen across the extra cell; server names
+stay truncated to the same 4-char budget at both sizes). It is a colored `N/M UP` hero with the
 data-freshness
 time under it ("updated 14:32"), then a two-column grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
