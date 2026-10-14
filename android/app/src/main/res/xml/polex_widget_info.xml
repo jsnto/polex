@@ -5,19 +5,20 @@
      - resizeMode=horizontal: the widget may be stretched across cells but
        never down a row, so the launcher offers 1x1 and 2x1 only — not
        1x2/2x2.
-     - maxWidth/maxHeight + min/maxResize (API 31+): 180dp wide is exactly
-       two cells on any common 4-column home grid (cell pitch 72-144dp)
-       and 80dp tall is one row; this keeps the offer capped at
-       2 wide x 1 tall. Launchers below API 31 ignore these attributes
-       and fall back to the resizeMode behaviour. -->
+     - maxWidth/maxHeight + min/maxResize (API 31+): 190dp wide is exactly
+       two cells on a 4-column home grid (a 484 dp-wide screen's ≈121 dp
+       cell needs ≥ 1.5× the pitch for a 2-wide offer) and 80dp tall is one
+       row; this keeps the offer capped at 2 wide x 1 tall. Launchers below
+       API 31 ignore these attributes and fall back to the resizeMode
+       behaviour. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="80dp"
     android:minHeight="80dp"
     android:minResizeWidth="80dp"
     android:minResizeHeight="80dp"
-    android:maxResizeWidth="180dp"
+    android:maxResizeWidth="190dp"
     android:maxResizeHeight="80dp"
-    android:maxWidth="180dp"
+    android:maxWidth="190dp"
     android:maxHeight="80dp"
     android:targetCellWidth="1"
     android:targetCellHeight="1"
