@@ -33,11 +33,9 @@ screen widget.
 - **Server detail** — the page a card links to: live status (online/latency,
   last checked, last wake, last shutdown), the configured settings (IP, MAC,
   check method, SSH user/key/password, power off command), the same power toggle, an
-  **Edit settings** button that
-  reuses the settings' add/edit form, and a destructive **Remove server** button that
-  opens the same "Delete server?" confirm dialog as the settings list and removes the
-  server via `DELETE /api/servers/:id` (on success it returns to the dashboard;
-  on failure the error is shown inline). System back returns to the dashboard
+  **Edit settings** button that reuses the settings' add/edit form
+  (whose **Danger zone** carries the destructive **Remove server** action —
+  see below). System back returns to the dashboard
   (or out of the edit form), not out of the app.
 - **Settings** — minimal menu (Backend / Servers / Log out):
   - **Backend** — change the backend URL;
@@ -54,7 +52,12 @@ screen widget.
     password when one is set). The **Power off command** field (optional)
     sets the exact command sent over SSH when powering the server off;
     leave it empty for the default `sudo systemctl poweroff` (it only
-    applies when the SSH power-off is enabled).
+    applies when the SSH power-off is enabled). When **editing** an existing
+    server, the form also has a **Danger zone** section with a destructive
+    **Remove server** button: the same "Delete server?" confirm dialog as
+    the settings list, removing the server via `DELETE /api/servers/:id`
+    (on success it navigates back — to the dashboard when reached from the
+    server detail page; on failure the error is shown inline).
 - **Home screen widget** (Glance) — at-a-glance 1×1 tile: a colored
   `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid of
   servers (offline shown in red). Refreshed in the background roughly every
@@ -67,8 +70,8 @@ screen widget.
 Helper script (from repo root, Docker-based, no Android SDK/IDE required):
 
 ```sh
-./scripts/build-apk.sh                # → android/apk/polex-debug.apk
-./scripts/build-apk.sh release        # → android/apk/polex-release.apk
+./scripts/build-apk.sh                # → android/dist/polex-debug.apk
+./scripts/build-apk.sh release        # → android/dist/polex-release.apk
 ./scripts/build-apk.sh local debug    # local gradle instead of Docker
 ```
 
@@ -80,20 +83,20 @@ cd android
 # (down -v + --no-cache) and verifies the in-image source matches the
 # working tree before compiling, so stale caches can't cause bad builds.
 docker compose up --build apk     # builds debug APK (manual equivalent)
-# → apk/polex-debug.apk
+# → dist/polex-debug.apk
 
 # optional: also/instead build a release APK (signed with the debug key,
 # so it installs; see the signingConfig in app/build.gradle.kts)
-TASKS="assembleRelease" docker compose up apk   # → apk/polex-release.apk
+TASKS="assembleRelease" docker compose up apk   # → dist/polex-release.apk
 ```
 
 The compose file (`docker-compose.yml` + `Dockerfile`) runs JDK 17, Android
 SDK 34 and Gradle 8.7 in a container, builds the app, and copies the APKs
-to `./apk/`. A named volume caches Gradle dependencies, so only the first
+to `./dist/`. A named volume caches Gradle dependencies, so only the first
 build is slow. Install on a phone with:
 
 ```sh
-adb install apk/polex-debug.apk
+adb install dist/polex-debug.apk
 ```
 
 ### Android Studio / local Gradle

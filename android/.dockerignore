@@ -7,7 +7,7 @@ app/build/
 build/
 
 # Generated artifacts — never needed in the build image.
-apk/
+dist/
 
 # Machine-specific; the image sets ANDROID_HOME itself. A stale host
 # local.properties (pointing at a host-only SDK path) would override it.

@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AndroidDir = Join-Path $Root "android"
-$ApkDir = Join-Path $AndroidDir "apk"
+$ApkDir = Join-Path $AndroidDir "dist"
 $Compose = Join-Path $AndroidDir "docker-compose.emulator.yml"
 $Apk = if ($ApkPath) { $ApkPath } else { Join-Path $ApkDir "polex-debug.apk" }
 $Package = "com.polex.app"
@@ -105,7 +105,7 @@ if ($Build -or -not (Test-Path $Apk)) {
 if (-not (Test-Path $Apk)) { throw "ERROR: APK not found: $Apk" }
 Write-Host "==> APK: $Apk"
 
-# Container mounts .\apk at /apk (read-only); copy a custom APK in if needed.
+# Container mounts .\dist at /apk (read-only); copy a custom APK in if needed.
 $ApkBase = Split-Path -Leaf $Apk
 $ApkDirOf = Split-Path -Parent $Apk
 $ApkDirResolved = $null

@@ -17,13 +17,13 @@ entry point (`scripts/build-apk.sh`; from the repo root):
 It wraps Docker with a hardened flow (see the script for details):
 `down -v` (drops the container **and** the `gradle-cache` volume),
 `build --no-cache apk` (forces `COPY . .` to re-copy the current source —
-`android/.dockerignore` keeps host `app/build/`, `.gradle/`, `apk/` and
+`android/.dockerignore` keeps host `app/build/`, `.gradle/`, `dist/` and
 `local.properties` out of the image), then a **source-fingerprint gate**
 (md5 of `app/src/**` on the host vs. in the image; aborts if they differ)
 before `up apk` runs the compile. `TASKS` is still interpolated, so the host
 env var overrides the default `assembleDebug`. `Dockerfile` provides
 JDK 17, Android SDK 34 and Gradle 8.7 (the repo has no gradle wrapper; the
-container supplies Gradle). APKs are copied to `apk/`; the `gradle-cache`
+container supplies Gradle). APKs are copied to `dist/`; the `gradle-cache`
 volume (re-created each run) caches dependencies.
 
 Local build instead:

@@ -6,12 +6,12 @@
 #   ./scripts/build-apk.sh release          # release APK (signed with debug key)
 #   ./scripts/build-apk.sh local debug      # build with local gradle (no docker)
 #
-# Output: android/apk/polex-debug.apk or android/apk/polex-release.apk
+# Output: android/dist/polex-debug.apk or android/dist/polex-release.apk
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT/android"
-APK_DIR="$ANDROID_DIR/apk"
+APK_DIR="$ANDROID_DIR/dist"
 
 TASK="${1:-debug}"
 METHOD="${2:-docker}"   # docker | local

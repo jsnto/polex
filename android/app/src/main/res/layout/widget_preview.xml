@@ -74,7 +74,10 @@
                 android:maxLines="1" />
         </LinearLayout>
 
-        <View
+        <!-- Spacer between the two cells: an empty TextView, because
+             RemoteViews (widget previews/initial layouts) refuse to inflate
+             a plain android.view.View ("Class not allowed to be inflated"). -->
+        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1" />

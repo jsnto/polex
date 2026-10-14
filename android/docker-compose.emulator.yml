@@ -7,7 +7,7 @@
 #   docker compose -f android/docker-compose.emulator.yml exec emulator /android/sdk/platform-tools/adb shell
 #   docker compose -f android/docker-compose.emulator.yml down
 #
-# The host's ./apk directory is mounted read-only at /apk inside the
+# The host's ./dist directory is mounted read-only at /apk inside the
 # container so the test script can install APKs from there.
 #
 # The image runs its own adb server (the emulator starts with
@@ -30,4 +30,4 @@ services:
     privileged: true
     volumes:
       - /dev/kvm:/dev/kvm
-      - ./apk:/apk:ro
+      - ./dist:/apk:ro

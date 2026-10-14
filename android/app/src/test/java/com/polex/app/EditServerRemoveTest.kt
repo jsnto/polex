@@ -3,6 +3,7 @@ package com.polex.app
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -21,15 +22,16 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Drives the real [ServerDetailScreen] — the "Remove server" button in the
- * Settings card and its "Delete server?" confirm dialog — through the
- * Compose UI test API (real composition, real clicks, real OkHttp calls),
- * with the backend stood in by a tiny local HTTP server that records every
- * request it receives.
+ * Drives the real [ServerDetailScreen] → [EditServerScreen] surface — the
+ * "Remove server" button in the edit form's Danger zone section and its
+ * "Delete server?" confirm dialog — through the Compose UI test API (real
+ * composition, real clicks, real OkHttp calls), with the backend stood in
+ * by a tiny local HTTP server that records every request it receives.
  *
- * The screen code under test is the production code: the button, the dialog,
- * [Api.delete], and the success/401/error branches of `removeServer`.
- * (The backend itself is exercised separately against the real Go binary.)
+ * The screen code under test is the production code: the Danger zone, the
+ * dialog, [Api.delete], and the success/401/error branches of
+ * `removeServer`. (The backend itself is exercised separately against the
+ * real Go binary.)
  *
  * [TestApplication] (via `@Config(application=...)`) registers the
  * test-only [TestDetailActivity] host with Robolectric's ShadowPackageManager;
@@ -38,7 +40,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = TestApplication::class)
-class ServerDetailRemoveTest {
+class EditServerRemoveTest {
 
     @get:Rule
     val compose = createAndroidComposeRule<TestDetailActivity>()
@@ -91,7 +93,7 @@ class ServerDetailRemoveTest {
     }
 
     /** Serves one connection: reads the request line + headers, answers with
-     *  the endpoints the [ServerDetailScreen] under test calls. */
+     *  the endpoints the screen under test calls. */
     private fun serve(conn: Socket) {
         conn.use { s ->
             val in_ = s.getInputStream().bufferedReader()
@@ -132,23 +134,65 @@ class ServerDetailRemoveTest {
         }
     }
 
-    private fun composeScreen(onBack: () -> Unit, onAuthError: () -> Unit) {
+    private fun composeDetail(onBack: () -> Unit, onAuthError: () -> Unit) {
         compose.setContent {
             ServerDetailScreen(serverId = 1, onBack = onBack, onAuthError = onAuthError)
         }
         // The screen scrolls; in the small test window the Settings card
         // starts below the fold, so wait for existence, then scroll into view.
-        waitFor("status card with the Remove server button") {
-            compose.onNodeWithText("Remove server").assertExists()
+        waitFor("detail page Settings card") {
+            compose.onNodeWithText("Settings").assertExists()
+        }
+        compose.onNodeWithText("Settings").performScrollTo()
+        compose.onNodeWithText("Settings").assertIsDisplayed()
+    }
+
+    /** True when at least one node with exactly [text] is composed (a
+     *  non-throwing existence check for the retry loops below). */
+    private fun hasNode(text: String): Boolean =
+        compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+
+    private fun openEditForm() {
+        compose.onNodeWithText("Edit settings").performScrollTo()
+        // Click retries: the detail page's 15 s auto-refresh recomposes the
+        // screen, and a click landing mid-recomposition can be dropped.
+        var opened = false
+        waitFor("edit form (Danger zone reachable)") {
+            opened = hasNode("Danger zone")
+            if (!opened) compose.onNodeWithText("Edit settings").performClick()
+            assertTrue("edit form did not open", opened)
         }
         compose.onNodeWithText("Remove server").performScrollTo()
         compose.onNodeWithText("Remove server").assertIsDisplayed()
     }
 
     private fun openRemoveDialog() {
-        compose.onNodeWithText("Remove server").performClick()
+        var shown = false
         waitFor("Delete server? dialog") {
-            compose.onNodeWithText("Delete server?").assertIsDisplayed()
+            shown = hasNode("Delete server?")
+            if (!shown) compose.onNodeWithText("Remove server").performClick()
+            assertTrue("dialog did not appear", shown)
+        }
+        compose.onNodeWithText("Delete server?").assertIsDisplayed()
+    }
+
+    /** Clicks the dialog's [label] button, retrying while the dialog is still
+     *  open (a dropped click leaves it open; once the click lands the dialog
+     *  closes synchronously, so a second click never double-fires). Re-clicks
+     *  are spaced 500 ms apart: during the dialog's exit animation the node
+     *  still exists while the hit target behind it has already changed, so a
+     *  rapid second click could land on the form. */
+    private fun clickDialogButton(label: String, what: String) {
+        var dismissed = false
+        var lastClickAt = 0L
+        waitFor(what) {
+            val now = System.currentTimeMillis()
+            if (hasNode(label) && now - lastClickAt >= 500L) {
+                compose.onNodeWithText(label).performClick()
+                lastClickAt = System.currentTimeMillis()
+            }
+            dismissed = !hasNode("Delete server?")
+            assertTrue("dialog still open after $label", dismissed)
         }
     }
 
@@ -173,13 +217,23 @@ class ServerDetailRemoveTest {
     }
 
     @Test
-    fun removeButtonShownInSettingsCardBesideEditSettings() {
+    fun detailPageNoLongerCarriesTheRemoveButton() {
         var back = 0
-        composeScreen(onBack = { back++ }, onAuthError = {})
-        compose.onNodeWithText("Settings").performScrollTo()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
+        composeDetail(onBack = { back++ }, onAuthError = {})
         compose.onNodeWithText("Edit settings").performScrollTo()
         compose.onNodeWithText("Edit settings").assertIsDisplayed()
+        // The button moved out of the detail page into the edit form.
+        compose.onNodeWithText("Remove server").assertDoesNotExist()
+        assertEquals(0, back)
+    }
+
+    @Test
+    fun removeButtonShownInDangerZoneOfEditForm() {
+        var back = 0
+        composeDetail(onBack = { back++ }, onAuthError = {})
+        openEditForm()
+        compose.onNodeWithText("Danger zone").performScrollTo()
+        compose.onNodeWithText("Danger zone").assertIsDisplayed()
         compose.onNodeWithText("Remove server").assertIsDisplayed()
         assertEquals(0, back)
     }
@@ -187,26 +241,28 @@ class ServerDetailRemoveTest {
     @Test
     fun confirmRemovesServerAndReturnsToDashboard() {
         var back = 0
-        composeScreen(onBack = { back++ }, onAuthError = {})
+        composeDetail(onBack = { back++ }, onAuthError = {})
+        openEditForm()
         openRemoveDialog()
         // Dialog mirrors the server list's wording, with this server's name + IP.
         compose
             .onNodeWithText("\"test-srv\" (192.168.1.50) will be removed.")
             .assertIsDisplayed()
-        compose.onNodeWithText("Delete").performClick()
+        clickDialogButton("Delete", "DELETE accepted (dialog closed)")
         waitFor("DELETE /api/servers/1 to reach the backend") {
             assertTrue("no DELETE recorded yet", deletes.isNotEmpty())
         }
         assertEquals("DELETE /api/servers/1 auth=Bearer tok123", deletes.first())
-        waitFor("return to the dashboard (onBack)") { assertEquals(1, back) }
+        waitFor("return to the dashboard (onDeleted → onBack)") { assertEquals(1, back) }
     }
 
     @Test
     fun cancelLeavesTheServerInPlace() {
         var back = 0
-        composeScreen(onBack = { back++ }, onAuthError = {})
+        composeDetail(onBack = { back++ }, onAuthError = {})
+        openEditForm()
         openRemoveDialog()
-        compose.onNodeWithText("Cancel").performClick()
+        clickDialogButton("Cancel", "dialog dismissed (Cancel)")
         compose.onNodeWithText("Delete server?").assertDoesNotExist()
         // Give a (wrong) async DELETE a chance to happen, then prove it didn't.
         Thread.sleep(500)
@@ -217,17 +273,19 @@ class ServerDetailRemoveTest {
     }
 
     @Test
-    fun failedDeleteShowsInlineErrorAndStaysOnPage() {
+    fun failedDeleteShowsInlineErrorAndStaysOnForm() {
         deleteMode = DeleteMode.NOT_FOUND
         var back = 0
-        composeScreen(onBack = { back++ }, onAuthError = {})
+        composeDetail(onBack = { back++ }, onAuthError = {})
+        openEditForm()
         openRemoveDialog()
-        compose.onNodeWithText("Delete").performClick()
-        waitFor("inline 'Remove failed' error") {
-            compose.onNodeWithText("Remove failed:", substring = true).assertIsDisplayed()
-        }
+        clickDialogButton("Delete", "DELETE accepted (dialog closed)")
+        // The inline error renders at the bottom of the (tall) form — below
+        // the fold in the small test window — so scroll it into view.
+        compose.onNodeWithText("Remove failed:", substring = true).performScrollTo()
+        compose.onNodeWithText("Remove failed:", substring = true).assertIsDisplayed()
         assertEquals(0, back)
-        // Still on the detail page: the button is still there, dialog gone.
+        // Still on the edit form: the button is still there, dialog gone.
         compose.onNodeWithText("Remove server").performScrollTo()
         compose.onNodeWithText("Remove server").assertIsDisplayed()
         compose.onNodeWithText("Delete server?").assertDoesNotExist()
@@ -237,9 +295,10 @@ class ServerDetailRemoveTest {
     fun rejectedSessionRoutesToReauth() {
         deleteMode = DeleteMode.UNAUTHORIZED
         var authError = 0
-        composeScreen(onBack = {}, onAuthError = { authError++ })
+        composeDetail(onBack = {}, onAuthError = { authError++ })
+        openEditForm()
         openRemoveDialog()
-        compose.onNodeWithText("Delete").performClick()
+        clickDialogButton("Delete", "DELETE accepted (dialog closed)")
         waitFor("onAuthError (back to login)") { assertEquals(1, authError) }
     }
 }

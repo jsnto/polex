@@ -48,8 +48,8 @@ Home-lab server status + Wake-on-LAN, from your phone.
 
 ```sh
 ./scripts/start-backend.sh               # start the backend (Docker or local Go)
-./scripts/build-apk.sh                   # build the Android APK → android/apk/
-adb install android/apk/polex-debug.apk    # install on a real device
+./scripts/build-apk.sh                   # build the Android APK → android/dist/
+adb install android/dist/polex-debug.apk  # install on a real device
 
 ./scripts/test-emulator.sh               # or smoke-test on a Dockerized
                                          # Android emulator (needs /dev/kvm)
@@ -59,7 +59,7 @@ adb install android/apk/polex-debug.apk    # install on a real device
 emulator via `android/docker-compose.emulator.yml`, installs + launches the
 app (which opens on the login screen — sign in with the `.env` credentials
 to see the dashboard), checks that its window is focused and logcat has no
-fatal crashes, and saves a screenshot to `android/apk/`. Flags: `--build`
+fatal crashes, and saves a screenshot to `android/dist/`. Flags: `--build`
 (force rebuild), `--keep` (leave emulator/backend running), `--apk <path>`.
 
 `build-apk.sh` forces a fresh Docker image every run (`down -v` +
@@ -227,7 +227,7 @@ curl -s -X POST localhost:8080/api/servers/1/wol -H "$AUTH"
 
 ```sh
 cd android
-docker compose up --build apk        # → android/apk/polex-debug.apk
+docker compose up --build apk        # → android/dist/polex-debug.apk
 
 # ...or use the helper script (docker, or local gradle as fallback/choice):
 #   ./scripts/build-apk.sh             # debug APK (docker)
@@ -242,7 +242,7 @@ gradle wrapper --gradle-version 8.7  # one-time, if no wrapper present
 Then install on a phone:
 
 ```sh
-adb install android/apk/polex-debug.apk
+adb install android/dist/polex-debug.apk
 ```
 
 ### Configure
