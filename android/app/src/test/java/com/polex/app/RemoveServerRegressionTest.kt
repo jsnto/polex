@@ -43,7 +43,7 @@ import org.robolectric.annotation.Config
  */
 @Config(sdk = [34], application = TestApplication::class)
 @RunWith(RobolectricTestRunner::class)
-open class RemoveServerStandInBase {
+abstract class RemoveServerStandInBase {
 
     @get:Rule
     val compose = createAndroidComposeRule<TestDetailActivity>()
