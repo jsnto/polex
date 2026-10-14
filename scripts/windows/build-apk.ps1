@@ -74,7 +74,7 @@ if ($Method -eq "docker") {
     # (COPY re-copies changed source; android/.dockerignore keeps stale host
     # build/gradle state out) and start a fresh container from it.
     docker compose down apk 2>$null
-    docker compose up --build apk
+    docker compose up --build --exit-code-from apk apk
     if ($LASTEXITCODE -ne 0) { throw "ERROR: docker compose build failed (see the `e:` lines above)" }
 }
 else {
