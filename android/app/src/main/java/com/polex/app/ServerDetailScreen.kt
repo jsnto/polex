@@ -65,6 +65,14 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     var powerBusy by remember { mutableStateOf(false) }
     var powerConfirm by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    // Frozen copy of the server entry the edit form is showing, captured
+    // when Edit settings is tapped. The form must not follow the live
+    // `status` poll: if the server disappears (deleted elsewhere) while the
+    // form is open, following the poll would drop the Danger zone and
+    // silently turn the form into a new-server form whose Save would POST a
+    // duplicate. With a frozen entry the form stays an edit form — Save and
+    // Remove hit the (now missing) id and surface the backend's error.
+    var editEntry by remember { mutableStateOf<SrvEntry?>(null) }
     // Disconnected state (connection-level fetch failure, code -1): shows
     // the same dedicated full-screen page as the dashboard; the
     // session/token are left untouched.
@@ -167,15 +175,14 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
-    // Edit mode: take over this screen with the shared add/edit form. The
-    // form's Danger zone carries the destructive remove-server action;
-    // after a successful delete go straight back to the dashboard — the
-    // server no longer exists, so there is no in-page state to refresh.
+    // Edit mode: take over this screen with the shared add/edit form, fed
+    // by the frozen [editEntry] (see its declaration). The form's Danger
+    // zone carries the destructive remove-server action; after a
+    // successful delete go straight back to the dashboard — the server no
+    // longer exists, so there is no in-page state to refresh.
     if (editing) {
         EditServerScreen(
-            server = status?.let {
-                SrvEntry(it.id, it.name, it.ip, it.mac, it.port, it.check, it.sshUser, it.sshKeyPath, it.sshPassword, it.poweroffCommand)
-            },
+            server = editEntry,
             isNew = false,
             onBack = {
                 editing = false
@@ -305,7 +312,13 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                         // The destructive remove-server action lives in the
                         // edit form's Danger zone, not here.
                         OutlinedButton(
-                            onClick = { editing = true },
+                            onClick = {
+                                editEntry = SrvEntry(
+                                    s.id, s.name, s.ip, s.mac, s.port, s.check,
+                                    s.sshUser, s.sshKeyPath, s.sshPassword, s.poweroffCommand,
+                                )
+                                editing = true
+                            },
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text("Edit settings")
