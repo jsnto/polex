@@ -1,12 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Offered sizes: 1x1 and 2x1 (2 wide, 1 tall).
+     - minWidth/minHeight 80dp: one cell (the launcher rounds up to the
+       grid pitch); targetCell 1x1: the default placement size.
+     - resizeMode=horizontal: the widget may be stretched across cells but
+       never down a row, so the launcher offers 1x1 and 2x1 only — not
+       1x2/2x2.
+     - maxWidth/maxHeight + min/maxResize (API 31+): 180dp wide is exactly
+       two cells on any common 4-column home grid (cell pitch 72-144dp)
+       and 80dp tall is one row; this keeps the offer capped at
+       2 wide x 1 tall. Launchers below API 31 ignore these attributes
+       and fall back to the resizeMode behaviour. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="80dp"
     android:minHeight="80dp"
+    android:minResizeWidth="80dp"
+    android:minResizeHeight="80dp"
+    android:maxResizeWidth="180dp"
+    android:maxResizeHeight="80dp"
+    android:maxWidth="180dp"
+    android:maxHeight="80dp"
     android:targetCellWidth="1"
     android:targetCellHeight="1"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_preview"
     android:previewLayout="@layout/widget_preview"
-    android:resizeMode="horizontal|vertical"
+    android:resizeMode="horizontal"
     android:widgetCategory="home_screen"
     android:description="@string/widget_description" />

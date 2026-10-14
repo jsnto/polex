@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Static preview of the 1×1 widget: colored N/M UP hero + freshness line,
-     then a two-column dot + name grid (offline cell styled red). -->
+<!-- Static preview of the widget (1x1; the launcher stretches the same
+     layout for the 2x1 offer): colored N/M UP hero + freshness line, then
+     a two-column dot + name grid (offline cell styled red). The two grid
+     cells are equal weighted halves, matching the Glance content layout
+     (ServerWidget) so the preview reflows the same way when stretched
+     across the wider 2x1 cell. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -44,7 +48,9 @@
         android:textColor="#9CA3AF"
         android:textSize="8sp" />
 
-    <!-- grid row: left-anchored and right-anchored cell around a filling spacer -->
+    <!-- grid row: two equal weighted halves (RemoteViews-safe elements
+         only — a plain android.view.View is refused by the launcher's
+         preview renderer, "Class not allowed to be inflated"). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -52,8 +58,9 @@
         android:gravity="center_vertical">
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
@@ -74,17 +81,10 @@
                 android:maxLines="1" />
         </LinearLayout>
 
-        <!-- Spacer between the two cells: an empty TextView, because
-             RemoteViews (widget previews/initial layouts) refuse to inflate
-             a plain android.view.View ("Class not allowed to be inflated"). -->
-        <TextView
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1" />
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 

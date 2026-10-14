@@ -41,10 +41,19 @@ private val DotGreen = Color(0xFF4CAF50)
 private val DotRed = Color(0xFFF44336)
 
 /**
- * Home screen widget (1×1, ≈89 dp cell): a colored `N/M UP` hero with the
+ * Home screen widget, offered at 1×1 and 2×1 (2 wide, 1 tall — see
+ * `res/xml/polex_widget_info.xml`): a colored `N/M UP` hero with the
  * data-freshness line under it, then a two-column grid of server cells
  * (dot + name; offline = red dot + red name — the `off` label drops at 1×1
  * width). Data comes from the status cache kept fresh by [StatusWorker].
+ *
+ * The grid reflows across the wider 2×1 cell with no layout branching:
+ * each grid row is two equal `defaultWeight` halves (instead of the old
+ * left/right anchors), so the same halves are tight at 1×1 and widen with
+ * the 2×1 span. The name budget follows the placed span — the instance
+ * options carry `cellX` once the launcher places/resizes it (API 31+,
+ * absent on pre-31 and before first placement → the 1-wide budget):
+ * [CELL_NAME_MAX] at 1 wide, [CELL_NAME_MAX_WIDE] at 2 wide.
  *
  * Tight rows — how the padding between rows is fixed:
  *  - Glance 1.1.0's `Text`/`TextStyle` exposes **no `lineHeight`** and the
@@ -66,8 +75,9 @@ private val DotRed = Color(0xFFF44336)
  *    rows + overflow (1) = at most 6; the grid shows at most [MAX_GRID_CELLS]
  *    servers (a "+N" line for the rest), the app shows the full list.
  *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
- *    space between cells, it can't cap name width), so the two cells anchor
- *    left/right with a filling spacer between them; the app shows the full,
+ *    space between cells, it can't cap name width), so the two-column grid
+ *    is built from two equal `defaultWeight` half-Columns per row (the name
+ *    budget above caps the name width instead); the app shows the full,
  *    aligned list.
  */
 class ServerWidget : GlanceAppWidget() {
@@ -76,8 +86,11 @@ class ServerWidget : GlanceAppWidget() {
         /** 1×1 budget: hero + a two-column grid of up to 6 servers (3 rows). */
         private const val MAX_GRID_CELLS = 6
 
-        /** Visible grid cell name chars before the "…" (10sp Medium, half-cell width). */
+        /** Visible grid cell name chars before the "…" (10sp Medium, 1×1 half-cell width). */
         private const val CELL_NAME_MAX = 4
+
+        /** Same budget at 2 wide: the half-cell is ≈2× wider (10sp Medium, 2×1 half-cell). */
+        private const val CELL_NAME_MAX_WIDE = 12
 
         // Tight row heights (see class KDoc). Sized to the 8/10/16 sp type:
         // ≈1.2× the font size, so the glyph span (≈0.9×) and its descenders
@@ -101,6 +114,17 @@ class ServerWidget : GlanceAppWidget() {
         val cacheTime = Prefs.cacheTime(context)
         val shown = items.take(MAX_GRID_CELLS)
         val hidden = items.size - shown.size
+
+        // Placed span: cellX lands in the instance options when the
+        // launcher places/resizes the widget (API 31+); absent → 1-wide
+        // budget (pre-31 launchers and pre-first-placement renders). The
+        // Glance receiver re-renders on option changes, so stretching a
+        // placed 1×1 to 2×1 picks the wider budget on the next render.
+        val options = runCatching {
+            AppWidgetManager.getInstance(context).getAppWidgetOptions(id.asInt())
+        }.getOrNull()
+        val cellX = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_CELL_X) ?: 1
+        val nameMax = if (cellX >= 2) CELL_NAME_MAX_WIDE else CELL_NAME_MAX
 
         // Colored by the up/down verdict (green all-up, red otherwise).
         val verdictColor = ColorProvider(if (allUp) DotGreen else DotRed)
@@ -157,7 +181,11 @@ class ServerWidget : GlanceAppWidget() {
                         style = freshStyle,
                     )
 
-                    // two-column grid of server cells (dot + name)
+                    // two-column grid of server cells (dot + name). Each row
+                    // is two equal weighted halves: RowScope has no per-cell
+                    // `weight` (only `defaultWeight`), so a fill-width Column
+                    // per column gives the even two-column split that
+                    // reflows across the 2×1 span.
                     shown.chunked(2).forEach { pair ->
                         Row(
                             modifier = GlanceModifier
@@ -165,9 +193,13 @@ class ServerWidget : GlanceAppWidget() {
                                 .height(cellHeight),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            pair.forEach { s ->
-                                cell(s)
-                                if (s != pair.last()) Spacer(GlanceModifier.fillMaxWidth())
+                            Column(GlanceModifier.defaultWeight(1f)) {
+                                cell(pair.first(), nameMax)
+                            }
+                            if (pair.size > 1) {
+                                Column(GlanceModifier.defaultWeight(1f)) {
+                                    cell(pair.last(), nameMax)
+                                }
                             }
                         }
                     }
@@ -185,7 +217,7 @@ class ServerWidget : GlanceAppWidget() {
 
     /** One grid cell: colored dot + truncated name; offline styled red (no `off` label at 1×1). */
     @Composable
-    private fun RowScope.cell(s: SrvStatus) {
+    private fun RowScope.cell(s: SrvStatus, nameMax: Int) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "●",
@@ -196,7 +228,7 @@ class ServerWidget : GlanceAppWidget() {
             )
             Spacer(GlanceModifier.width(3.dp))
             Text(
-                text = cellName(s.name),
+                text = cellName(s.name, nameMax),
                 style = TextStyle(
                     color = ColorProvider(if (s.online) TextPrimary else DotRed),
                     fontWeight = FontWeight.Medium,
@@ -207,8 +239,8 @@ class ServerWidget : GlanceAppWidget() {
         }
     }
 
-    private fun cellName(name: String): String =
-        if (name.length <= CELL_NAME_MAX) name else name.take(CELL_NAME_MAX) + "…"
+    private fun cellName(name: String, max: Int): String =
+        if (name.length <= max) name else name.take(max) + "…"
 
     private fun timeOfDay(epochMillis: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))

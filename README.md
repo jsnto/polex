@@ -36,7 +36,8 @@ Home-lab server status + Wake-on-LAN, from your phone.
     highlighted in amber with a one-line note — an unreachable backend shows
     "unreachable" and is **not** treated as a mismatch (comparison helpers:
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
-  - a **home screen widget** (Glance) — a compact 1×1 tile: a colored
+  - a **home screen widget** (Glance) — a compact 1×1 or 2×1 (2 wide,
+    1 tall) tile: a colored
     `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
     (offline servers in red, `+N more` overflow); tapping it opens the
     app. A background job (WorkManager + an inexact alarm, since the
@@ -281,7 +282,9 @@ adb install android/dist/polex-debug.apk
 ### Widget
 
 Long-press the home screen → Widgets → **PoleX** → drag it onto the home
-screen. It is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+screen. It is offered at 1×1 (default) and 2×1 (2 wide, 1 tall — stretch it
+when placing or resizing it; it can't be resized vertically): a colored
+`N/M UP` hero with the data-freshness
 time under it ("updated 14:32"), then a two-column grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
 doesn't fit). **Tapping it opens the

@@ -58,7 +58,8 @@ screen widget.
     the settings list, removing the server via `DELETE /api/servers/:id`
     (on success it navigates back — to the dashboard when reached from the
     server detail page; on failure the error is shown inline).
-- **Home screen widget** (Glance) — at-a-glance 1×1 tile: a colored
+- **Home screen widget** (Glance) — at-a-glance 1×1 or 2×1 (2 wide,
+  1 tall) tile: a colored
   `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid of
   servers (offline shown in red). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
@@ -138,7 +139,10 @@ Long-press the home screen → **Widgets** → **PoleX** → drag to the home
 screen. It appears empty until the first background refresh succeeds or you
 open the app once (the app refreshes the widget on every status poll).
 
-The widget is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+The widget is offered at 1×1 (the default placement size) and 2×1 (2 wide,
+1 tall — the grid's two columns widen across the extra cell and the server
+names show more characters). It is a colored `N/M UP` hero with the
+data-freshness
 time under it ("updated 14:32"), then a two-column grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
 doesn't fit). **Tapping it opens the app**.
