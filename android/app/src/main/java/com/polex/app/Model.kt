@@ -134,6 +134,20 @@ fun parseOk(body: String): Boolean =
         false
     }
 
+/** Pulls a human-readable error out of a backend response body — the `error`
+ *  field of error responses, or the `message` field WOL/shutdown failures
+ *  carry (`{"ok":false,"message":...}`) — falling back to the raw body when
+ *  it is not JSON or carries neither. Keeps UI strings plain text: raw JSON
+ *  in a message string broke accessibility text on device (the node rendered
+ *  but reported an empty label). */
+fun friendlyError(body: String): String =
+    try {
+        val o = JSONObject(body)
+        o.optString("error").ifEmpty { o.optString("message") }.ifEmpty { body }
+    } catch (_: Exception) {
+        body
+    }
+
 /** Parses an RFC3339 UTC timestamp to epoch millis (null if unparseable, e.g. "never"). */
 fun parseEpoch(rfc3339: String): Long? =
     try {

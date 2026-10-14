@@ -517,20 +517,6 @@ fun ServersScreen(
 }
 
 /**
- * Pulls the human-readable `error` field out of a backend error body
- * (`{"error":"..."}`); falls back to the raw body when it is not JSON or
- * carries no error field. Keeps UI strings plain text — raw JSON in a
- * message string broke accessibility text on device (the node rendered but
- * reported an empty label).
- */
-private fun friendlyError(body: String): String =
-    try {
-        org.json.JSONObject(body).optString("error").ifEmpty { body }
-    } catch (_: Exception) {
-        body
-    }
-
-/**
  * New-server / edit-server form (POST or PUT /api/servers).
  *
  * Editing an existing server also carries the destructive remove-server

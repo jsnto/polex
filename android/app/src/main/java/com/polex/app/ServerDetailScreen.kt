@@ -122,7 +122,7 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
                 else -> {
                     // Reachable backend, other error: keep the inline bar.
                     disconnected = false
-                    error = "Server error ${result.code}: ${result.body}"
+                    error = "Server error ${result.code}: ${friendlyError(result.body)}"
                 }
             }
         }
@@ -167,9 +167,9 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
             snackbar.showSnackbar(
                 when {
                     s.online && ok -> "Shutdown command sent to ${s.name}"
-                    s.online -> "Shutdown failed: ${result.body}"
+                    s.online -> "Shutdown failed: ${friendlyError(result.body)}"
                     ok -> "Wake packet sent to ${s.name}"
-                    else -> "WOL failed: ${result.body}"
+                    else -> "WOL failed: ${friendlyError(result.body)}"
                 }
             )
         }

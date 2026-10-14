@@ -128,7 +128,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             else -> {
                 // Reachable backend, other error: keep the inline error bar.
                 disconnected = false
-                error = "Server error ${result.code}: ${result.body}"
+                error = "Server error ${result.code}: ${friendlyError(result.body)}"
             }
         }
         loading = false
@@ -175,9 +175,9 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             snackbar.showSnackbar(
                 when {
                     s.online && ok -> "Shutdown command sent to ${s.name}"
-                    s.online -> "Shutdown failed: ${result.body}"
+                    s.online -> "Shutdown failed: ${friendlyError(result.body)}"
                     ok -> "Wake packet sent to ${s.name}"
-                    else -> "WOL failed: ${result.body}"
+                    else -> "WOL failed: ${friendlyError(result.body)}"
                 }
             )
         }
