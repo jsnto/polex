@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -112,6 +114,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 editTarget = null
                 pane = SettingsPane.Servers
             },
+            onAuthError = onLogout,
         )
     }
 }
@@ -324,7 +327,7 @@ fun ServersScreen(
                 servers = parseServerArray(result.body)
                 ""
             } else {
-                "Cannot load servers (${result.body})"
+                "Cannot load servers (${friendlyError(result.body)})"
             }
         }
     }
@@ -334,7 +337,7 @@ fun ServersScreen(
     fun deleteServer(s: SrvEntry) {
         scope.launch {
             val result = Api.safe { Api.delete("${Api.base(context)}/api/servers/${s.id}") }
-            message = if (result.code in 200..299) "Server deleted." else "Delete failed: ${result.body}"
+            message = if (result.code in 200..299) "Server deleted." else "Delete failed: ${friendlyError(result.body)}"
             loadServers()
         }
     }
@@ -344,7 +347,7 @@ fun ServersScreen(
         val order = servers.map { it.id }
         scope.launch {
             val result = Api.safe { Api.post("${Api.base(context)}/api/servers/reorder", reorderJson(order)) }
-            message = if (result.code in 200..299) "" else "Reorder failed: ${result.body}"
+            message = if (result.code in 200..299) "" else "Reorder failed: ${friendlyError(result.body)}"
             if (result.code !in 200..299) loadServers() // roll back to server order
         }
     }
@@ -513,13 +516,24 @@ fun ServersScreen(
     }
 }
 
-/** New-server / edit-server form (POST or PUT /api/servers). */
+/**
+ * New-server / edit-server form (POST or PUT /api/servers).
+ *
+ * Editing an existing server also carries the destructive remove-server
+ * action in a **Danger zone** section (the detail page's old Settings-card
+ * button moved here): "Remove server" → "Delete server?" confirm dialog →
+ * `DELETE /api/servers/:id`. On success it navigates away ([onDeleted] when
+ * provided, else [onBack]); on failure the error is shown inline like the
+ * form's save errors, plus a dismissible "Remove failed" dialog.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditServerScreen(
     server: SrvEntry?,          // null = new server
     isNew: Boolean,
     onBack: () -> Unit,
+    onDeleted: (() -> Unit)? = null,   // where to go after a successful remove
+    onAuthError: (() -> Unit)? = null, // session rejected mid-remove → re-auth
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -534,6 +548,12 @@ fun EditServerScreen(
     var poweroffCommand by remember { mutableStateOf(server?.poweroffCommand ?: "") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var removeConfirm by remember { mutableStateOf(false) }
+    // A failed remove is also surfaced as a dialog: the dialog surface is
+    // guaranteed visible even when the form's bottom (where the inline
+    // message sits) is off-screen or scrolled out. Dismissing it keeps the
+    // inline message.
+    var removeError by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
         if (busy) return
@@ -555,7 +575,35 @@ fun EditServerScreen(
             if (result.code in 200..299) {
                 onBack()
             } else {
-                message = "Save failed: ${result.body}"
+                message = "Save failed: ${friendlyError(result.body)}"
+            }
+        }
+    }
+
+    /** Remove the server through the same endpoint the settings list uses.
+     *  On success, navigate away ([onDeleted] when provided — e.g. the
+     *  detail page returns to the dashboard, since the server no longer
+     *  exists — else [onBack]); on failure, stay on the form and surface
+     *  the error inline like the save errors, plus the "Remove failed"
+     *  dialog. */
+    fun removeServer() {
+        val s = server ?: return
+        if (busy) return
+        busy = true
+        scope.launch {
+            val result = Api.safe { Api.delete("${Api.base(context)}/api/servers/${s.id}") }
+            busy = false
+            when {
+                // Elvis on the REFERENCES, then one call: pick the callback
+                // and invoke it (a bare `onDeleted ?: onBack()` would only
+                // evaluate to a function value and never call it).
+                result.code in 200..299 -> (onDeleted ?: onBack)()
+                Disconnect.requiresReauth(result.code) -> onAuthError?.invoke()
+                else -> {
+                    val detail = friendlyError(result.body)
+                    message = "Remove failed: $detail"
+                    removeError = detail
+                }
             }
         }
     }
@@ -663,6 +711,40 @@ fun EditServerScreen(
                     )
                 }
             }
+            // ---- danger zone (existing servers only) ----
+            if (!isNew && server != null) {
+                // Tinted card, red heading and red button: the app's
+                // destructive affordances are OfflineRed.
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = OfflineRed.copy(alpha = 0.08f)),
+                ) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            "Danger zone",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = OfflineRed,
+                        )
+                        Text(
+                            "Removing this server deletes its configuration from the backend. This cannot be undone.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedButton(
+                            onClick = { removeConfirm = true },
+                            enabled = !busy,
+                            // Also tints the border, which follows contentColor.
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = OfflineRed),
+                        ) {
+                            Text("Remove server")
+                        }
+                    }
+                }
+            }
             if (message.isNotEmpty()) {
                 Text(
                     message,
@@ -678,5 +760,37 @@ fun EditServerScreen(
                 Text(if (busy) "Saving…" else if (isNew) "Add server" else "Save changes")
             }
         }
+    }
+
+    // Remove confirmation dialog, same style as the server list's
+    // "Delete server?" dialog; confirm calls the same DELETE endpoint.
+    val removeTarget = if (removeConfirm) server else null
+    removeTarget?.let { s ->
+        AlertDialog(
+            onDismissRequest = { removeConfirm = false },
+            title = { Text("Delete server?") },
+            text = { Text("\"${s.name}\" (${s.ip}) will be removed.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeConfirm = false
+                    removeServer()
+                }) {
+                    Text("Delete", color = OfflineRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+    removeError?.let { detail ->
+        AlertDialog(
+            onDismissRequest = { removeError = null },
+            title = { Text("Remove failed") },
+            text = { Text("The server could not be removed: $detail") },
+            confirmButton = {
+                TextButton(onClick = { removeError = null }) { Text("OK") }
+            },
+        )
     }
 }

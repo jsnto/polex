@@ -105,14 +105,14 @@ ADDR=":9000" CHECK_INTERVAL=5s ./scripts/start-backend.sh
 #   .\scripts\windows\test-emulator.ps1 -Keep
 ```
 
-APKs land in `android/apk/`.
+APKs land in `android/dist/`.
 
 On Windows, the `scripts/windows/*.ps1` scripts mirror these; the emulator
 needs Docker Desktop's WSL2 backend (KVM), instead of a host `/dev/kvm`.
 
 `test-emulator.sh` uses `android/docker-compose.emulator.yml` (Google's official
 prebuilt emulator image, KVM-backed). It verifies: app window focused, no fatal
-logcat crashes, and writes a screenshot to `android/apk/`. It does NOT
+logcat crashes, and writes a screenshot to `android/dist/`. It does NOT
 replace on-device testing of the Glance widget (widgets render differently in
 the emulator's launcher).
 

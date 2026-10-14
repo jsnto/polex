@@ -7,6 +7,6 @@ backend/.env
 android/.gradle
 android/build
 android/app/build
-android/apk/
+android/dist/
 *.iml
 .idea

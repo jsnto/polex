@@ -84,7 +84,7 @@ fun LoginScreen(onLogin: () -> Unit) {
                     error = "Login failed: no token in response"
                 }
                 result.code == 401 -> error = "Invalid username or password"
-                result.code == -1 -> error = "Cannot reach backend (${result.body})"
+                result.code == -1 -> error = "Cannot reach backend (${friendlyError(result.body)})"
                 else -> error = "Login failed (HTTP ${result.code})"
             }
             busy = false

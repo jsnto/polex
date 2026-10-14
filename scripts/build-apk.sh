@@ -6,12 +6,12 @@
 #   ./scripts/build-apk.sh release          # release APK (signed with debug key)
 #   ./scripts/build-apk.sh local debug      # build with local gradle (no docker)
 #
-# Output: android/apk/polex-debug.apk or android/apk/polex-release.apk
+# Output: android/dist/polex-debug.apk or android/dist/polex-release.apk
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT/android"
-APK_DIR="$ANDROID_DIR/apk"
+APK_DIR="$ANDROID_DIR/dist"
 
 TASK="${1:-debug}"
 METHOD="${2:-docker}"   # docker | local
@@ -61,8 +61,11 @@ build_docker() {
     fi
     echo "==> Source verified in image (md5 ${host_src:0:12}...)"
 
-    # 5) Build from the verified image.
-    TASKS="$tasks" docker compose up apk
+    # 5) Build from the verified image. --exit-code-from propagates a
+    #    failed gradle run to this script (plain `up` exits 0 even when
+    #    the container build fails, which would ship an empty dist/ as
+    #    "success").
+    TASKS="$tasks" docker compose up --exit-code-from apk apk
 }
 
 build_local() {

@@ -17,13 +17,13 @@ entry point (`scripts/build-apk.sh`; from the repo root):
 It wraps Docker with a hardened flow (see the script for details):
 `down -v` (drops the container **and** the `gradle-cache` volume),
 `build --no-cache apk` (forces `COPY . .` to re-copy the current source —
-`android/.dockerignore` keeps host `app/build/`, `.gradle/`, `apk/` and
+`android/.dockerignore` keeps host `app/build/`, `.gradle/`, `dist/` and
 `local.properties` out of the image), then a **source-fingerprint gate**
 (md5 of `app/src/**` on the host vs. in the image; aborts if they differ)
 before `up apk` runs the compile. `TASKS` is still interpolated, so the host
 env var overrides the default `assembleDebug`. `Dockerfile` provides
 JDK 17, Android SDK 34 and Gradle 8.7 (the repo has no gradle wrapper; the
-container supplies Gradle). APKs are copied to `apk/`; the `gradle-cache`
+container supplies Gradle). APKs are copied to `dist/`; the `gradle-cache`
 volume (re-created each run) caches dependencies.
 
 Local build instead:
@@ -55,7 +55,7 @@ errors. Prefer that over manual runs when verifying app changes.
 | `Api.kt`           | Blocking OkHttp client (`Api.get/post/put/delete` → `Result(code, body)`); sends `Authorization: Bearer <Api.authToken>` when set. Always call via **`Api.safe { … }`** (runs on the IO dispatcher, maps connection failures to `Result(-1, …)` so callers branch on `code` alone); `Api.sendWol(context, id)` is the WOL POST helper and `Api.sendShutdown(context, id)` the clean-SSH-shutdown POST helper. Raw OkHttp must never be touched from UI code |
 | `Prefs.kt`         | SharedPreferences: backend base URL, auth token, cached `/api/status` JSON (also read by the widget) |
 | `Model.kt`         | `SrvStatus` / `SrvEntry` (+ `check` field, `"tcp"`/`"ping"`; + `sshUser`/`sshKeyPath`/`sshPassword`/`poweroffCommand`, `lastShutdownAt`) + JSON (org.json) parse/format helpers; `serverToJson(name, ip, mac, port, check, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?)`, `reorderJson(ids)`, `parseOk(body)` (`"ok"` flag), `sshConfigured()` (user plus a key path and/or password — mirrors the backend predicate), `effectivePoweroffCommand()` (per-server `poweroffCommand` or the default `DEFAULT_POWEROFF_COMMAND` = `sudo systemctl poweroff`), `parseEpoch`/`relativeTime` |
-| `ServerWidget.kt`  | Glance `GlanceAppWidget` (`ServerWidget`) + `ServerWidgetProvider`. **1×1 layout** (`polex_widget_info.xml`: `targetCellWidth/Height = 1`): a colored `N/M UP` hero row (16 sp) with the `updated HH:mm` freshness line under it, then a two-column grid of server cells (dot + name, truncated to fit the half-width cell; offline = red dot + red name — the `off` label drops at 1×1), max 6 cells (3 rows) + `+N more` overflow. Rows are fixed dp heights (18 dp hero, 10 dp freshness/overflow, 12 dp grid rows) — Glance 1.1.0's `TextStyle` has no `lineHeight`, so the fixed heights are the only lever to keep the rows tight in the ≈89 dp cell. Whole widget is `clickable` → `actionStartActivity` opens `MainActivity`. Renders from the Prefs cache, never from the network |
+| `ServerWidget.kt`  | Glance `GlanceAppWidget` (`ServerWidget`) + `ServerWidgetProvider`. Offered at **1×1 (default, `targetCellWidth/Height = 1`) and 2×1** (`polex_widget_info.xml`: `resizeMode=horizontal` + 190 dp width cap → 2 wide × 1 tall only): a colored `N/M UP` hero row (16 sp) with the `updated HH:mm` freshness line under it, then a two-column grid of server cells (dot + name; the two columns are equal `defaultWeight` half-Columns that reflow across the 2×1 span — the name budget is always `CELL_NAME_MAX` (4 chars) at both sizes, since the launcher's instance options carry the cell position (`cellX`), not the span; offline = red dot + red name — the `off` label drops at 1×1), max 6 cells (3 rows) + `+N more` overflow. Rows are fixed dp heights (18 dp hero, 10 dp freshness/overflow, 12 dp grid rows) — Glance 1.1.0's `TextStyle` has no `lineHeight`, so the fixed heights are the only lever to keep the rows tight in the ≈89 dp cell. Whole widget is `clickable` → `actionStartActivity` opens `MainActivity`. Renders from the Prefs cache, never from the network |
 | `StatusWorker.kt`  | WorkManager `CoroutineWorker`; fetches status, writes cache, calls `ServerWidget.refreshAll`. Two triggers: the 15-min periodic job and `enqueueNow` (one-shot) fired by the widget's system tick **and** by the `WidgetAlarm` inexact alarm |
 | `WidgetAlarm.kt`   | Self-rescheduling **inexact** alarm (~15 min, `setAndAllowWhileIdle`, no permission) + `WidgetRefreshReceiver` that calls `StatusWorker.enqueueNow` and re-arms itself. Belt-and-braces against the system deferring the WorkManager periodic job (which is what left the widget stale until the app was opened). Scheduled once in `MainActivity.onCreate` |
 
@@ -194,8 +194,9 @@ errors. Prefer that over manual runs when verifying app changes.
     `androidx.glance.action.clickable` +
     `androidx.glance.appwidget.action.actionStartActivity(Intent(context,
     MainActivity::class.java))` on the root Column's modifier. The widget is
-    intentionally compact — a 1×1 cell (`targetCellWidth/Height = 1` in
-    `res/xml/polex_widget_info.xml`): colored `N/M UP` hero + freshness line
+    intentionally compact — default 1×1 cell (`targetCellWidth/Height = 1` in
+    `res/xml/polex_widget_info.xml`), offered at 2×1 as well (horizontal
+    resize only): colored `N/M UP` hero + freshness line
     over a two-column dot+name grid with `+N more` overflow. Keep it that way.
   - `Text` in 1.1.0 has **no `overflow` parameter** (only `text`, `modifier`,
     `style`, `maxLines`) — pre-truncate long strings in Kotlin instead.

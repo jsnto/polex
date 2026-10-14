@@ -17,7 +17,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANDROID_DIR="$ROOT/android"
-APK="$ANDROID_DIR/apk/polex-debug.apk"
+APK="$ANDROID_DIR/dist/polex-debug.apk"
 COMPOSE="$ANDROID_DIR/docker-compose.emulator.yml"
 # Google's official prebuilt image (google/android-emulator-container-scripts).
 # us-docker.pkg.dev is anonymous-pull; ghcr.io/gcr.io are blocked on some
@@ -40,7 +40,7 @@ for arg in "$@"; do
 done
 
 cleanup() {
-    if [ $KEEP -eq 1 ]; then return; fi
+    if [ "$KEEP" -eq 1 ]; then return; fi
     echo "==> Tearing down"
     docker compose -f "$COMPOSE" down --remove-orphans >/dev/null 2>&1 || true
     if [ -n "${BACKEND_PID:-}" ]; then
@@ -89,11 +89,11 @@ fi
 # not guaranteed to include platform-tools.
 adb() { docker compose -f "$COMPOSE" exec -T emulator /android/sdk/platform-tools/adb "$@"; }
 
-# The container mounts ./apk at /apk (read-only), so the APK to install must
+# The container mounts ./dist at /apk (read-only), so the APK to install must
 # live there. Copy a custom --apk path in if it doesn't already.
 APK_IN_CONTAINER="/apk/$(basename "$APK")"
-if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/apk" ]; then
-    cp "$APK" "$ANDROID_DIR/apk/"
+if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/dist" ]; then
+    cp "$APK" "$ANDROID_DIR/dist/"
 fi
 
 # --- 3. emulator ---------------------------------------------------------------
@@ -137,7 +137,7 @@ else
     echo "PASS: no fatal crashes in logcat"
 fi
 
-SHOT="$ROOT/android/apk/screenshot-$(date +%Y%m%d-%H%M%S).png"
+SHOT="$ROOT/android/dist/screenshot-$(date +%Y%m%d-%H%M%S).png"
 if adb exec-out screencap -p > "$SHOT" 2>/dev/null && [ -s "$SHOT" ]; then
     echo "PASS: screenshot saved: $SHOT"
 else

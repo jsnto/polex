@@ -85,7 +85,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
 
     // Compose UI tests on the JVM (Robolectric): drives the real screens with
-    // real clicks; see ServerDetailRemoveTest.
+    // real clicks; see EditServerRemoveTest.
     testImplementation(platform("androidx.compose:compose-bom:2024.09.02"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test.ext:junit:1.2.1")

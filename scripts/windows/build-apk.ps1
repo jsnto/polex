@@ -6,7 +6,7 @@
 .DESCRIPTION
     Wraps `docker compose up --build apk` from android/docker-compose.yml.
     Docker Desktop for Windows is required. No local JDK/Android SDK needed.
-    APKs land in android\apk\.
+    APKs land in android\dist.
 
 .PARAMETER Task
     debug (default) or release.
@@ -32,7 +32,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AndroidDir = Join-Path $Root "android"
-$ApkDir = Join-Path $AndroidDir "apk"
+$ApkDir = Join-Path $AndroidDir "dist"
 
 function Find-DockerExe {
     $cmd = Get-Command docker -ErrorAction SilentlyContinue
@@ -74,7 +74,7 @@ if ($Method -eq "docker") {
     # (COPY re-copies changed source; android/.dockerignore keeps stale host
     # build/gradle state out) and start a fresh container from it.
     docker compose down apk 2>$null
-    docker compose up --build apk
+    docker compose up --build --exit-code-from apk apk
     if ($LASTEXITCODE -ne 0) { throw "ERROR: docker compose build failed (see the `e:` lines above)" }
 }
 else {

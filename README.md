@@ -36,7 +36,8 @@ Home-lab server status + Wake-on-LAN, from your phone.
     highlighted in amber with a one-line note — an unreachable backend shows
     "unreachable" and is **not** treated as a mismatch (comparison helpers:
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
-  - a **home screen widget** (Glance) — a compact 1×1 tile: a colored
+  - a **home screen widget** (Glance) — a compact 1×1 or 2×1 (2 wide,
+    1 tall) tile: a colored
     `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
     (offline servers in red, `+N more` overflow); tapping it opens the
     app. A background job (WorkManager + an inexact alarm, since the
@@ -48,8 +49,8 @@ Home-lab server status + Wake-on-LAN, from your phone.
 
 ```sh
 ./scripts/start-backend.sh               # start the backend (Docker or local Go)
-./scripts/build-apk.sh                   # build the Android APK → android/apk/
-adb install android/apk/polex-debug.apk    # install on a real device
+./scripts/build-apk.sh                   # build the Android APK → android/dist/
+adb install android/dist/polex-debug.apk  # install on a real device
 
 ./scripts/test-emulator.sh               # or smoke-test on a Dockerized
                                          # Android emulator (needs /dev/kvm)
@@ -59,7 +60,7 @@ adb install android/apk/polex-debug.apk    # install on a real device
 emulator via `android/docker-compose.emulator.yml`, installs + launches the
 app (which opens on the login screen — sign in with the `.env` credentials
 to see the dashboard), checks that its window is focused and logcat has no
-fatal crashes, and saves a screenshot to `android/apk/`. Flags: `--build`
+fatal crashes, and saves a screenshot to `android/dist/`. Flags: `--build`
 (force rebuild), `--keep` (leave emulator/backend running), `--apk <path>`.
 
 `build-apk.sh` forces a fresh Docker image every run (`down -v` +
@@ -227,7 +228,7 @@ curl -s -X POST localhost:8080/api/servers/1/wol -H "$AUTH"
 
 ```sh
 cd android
-docker compose up --build apk        # → android/apk/polex-debug.apk
+docker compose up --build apk        # → android/dist/polex-debug.apk
 
 # ...or use the helper script (docker, or local gradle as fallback/choice):
 #   ./scripts/build-apk.sh             # debug APK (docker)
@@ -242,7 +243,7 @@ gradle wrapper --gradle-version 8.7  # one-time, if no wrapper present
 Then install on a phone:
 
 ```sh
-adb install android/apk/polex-debug.apk
+adb install android/dist/polex-debug.apk
 ```
 
 ### Configure
@@ -281,7 +282,9 @@ adb install android/apk/polex-debug.apk
 ### Widget
 
 Long-press the home screen → Widgets → **PoleX** → drag it onto the home
-screen. It is a 1×1 tile: a colored `N/M UP` hero with the data-freshness
+screen. It is offered at 1×1 (default) and 2×1 (2 wide, 1 tall — stretch it
+when placing or resizing it; it can't be resized vertically): a colored
+`N/M UP` hero with the data-freshness
 time under it ("updated 14:32"), then a two-column grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
 doesn't fit). **Tapping it opens the
