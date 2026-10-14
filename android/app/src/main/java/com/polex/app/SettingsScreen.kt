@@ -327,7 +327,7 @@ fun ServersScreen(
                 servers = parseServerArray(result.body)
                 ""
             } else {
-                "Cannot load servers (${result.body})"
+                "Cannot load servers (${friendlyError(result.body)})"
             }
         }
     }
@@ -337,7 +337,7 @@ fun ServersScreen(
     fun deleteServer(s: SrvEntry) {
         scope.launch {
             val result = Api.safe { Api.delete("${Api.base(context)}/api/servers/${s.id}") }
-            message = if (result.code in 200..299) "Server deleted." else "Delete failed: ${result.body}"
+            message = if (result.code in 200..299) "Server deleted." else "Delete failed: ${friendlyError(result.body)}"
             loadServers()
         }
     }
@@ -347,7 +347,7 @@ fun ServersScreen(
         val order = servers.map { it.id }
         scope.launch {
             val result = Api.safe { Api.post("${Api.base(context)}/api/servers/reorder", reorderJson(order)) }
-            message = if (result.code in 200..299) "" else "Reorder failed: ${result.body}"
+            message = if (result.code in 200..299) "" else "Reorder failed: ${friendlyError(result.body)}"
             if (result.code !in 200..299) loadServers() // roll back to server order
         }
     }
@@ -589,7 +589,7 @@ fun EditServerScreen(
             if (result.code in 200..299) {
                 onBack()
             } else {
-                message = "Save failed: ${result.body}"
+                message = "Save failed: ${friendlyError(result.body)}"
             }
         }
     }
