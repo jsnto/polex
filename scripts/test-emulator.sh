@@ -89,10 +89,10 @@ fi
 # not guaranteed to include platform-tools.
 adb() { docker compose -f "$COMPOSE" exec -T emulator /android/sdk/platform-tools/adb "$@"; }
 
-# The container mounts ./apk at /apk (read-only), so the APK to install must
+# The container mounts ./dist at /apk (read-only), so the APK to install must
 # live there. Copy a custom --apk path in if it doesn't already.
 APK_IN_CONTAINER="/apk/$(basename "$APK")"
-if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/apk" ]; then
+if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/dist" ]; then
     cp "$APK" "$ANDROID_DIR/dist/"
 fi
 

@@ -114,6 +114,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 editTarget = null
                 pane = SettingsPane.Servers
             },
+            onAuthError = onLogout,
         )
     }
 }
