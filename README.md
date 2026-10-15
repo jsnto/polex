@@ -287,8 +287,10 @@ adb install android/dist/polex-debug.apk
 ### Widget
 
 Long-press the home screen → Widgets → **PoleX** → drag it onto the home
-screen. It is offered at 1×1 (default) and 2×1 (2 wide, 1 tall — stretch it
-when placing or resizing it; it can't be resized vertically): a colored
+screen. It is offered at 1×1 (default) and 2×1 (2 wide, 1 tall) on every
+launcher, plus 1×2 and 2×2 on launchers with a row pitch under 80dp (e.g.
+the Samsung S26 Ultra's One UI launcher — drag/resize it vertically
+there): a colored
 `N/M UP` hero with the data-freshness
 time under it ("updated 14:32"), then a grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
@@ -296,7 +298,17 @@ doesn't fit). The widget's declared minimum width is 40dp — the AOSP-safe
 floor that lets launchers with a ≥40dp picker column pitch offer the
 1-column (1×1) tile (the Pixel 7 Pro's picker pitch is in [40, 80) dp);
 a placed widget is always at least one home-grid column wide (≈94 dp on
-the Pixel), where the content fits. **What it shows is configurable in
+the Pixel), where the content fits. The declared height floor is the same
+40dp, so the offered row range is one row on tall-row launchers (pitch
+≥80dp: the Pixel ≈116dp, the A52 ≈89dp — 1×1 + 2×1 only) and 1-2 rows on
+short-row launchers (pitch <80dp, e.g. the Samsung S26 Ultra's One UI
+launcher, where the old 80dp floor made the picker offer only a 1×2 tile —
+now 1×1, 2×1, 1×2 and 2×2 are all placeable); on such short rows the
+widget renders compact, dropping the secondary "updated HH:mm" line when
+the row can't hold the full layout (the budget is the height the launcher
+actually allocated to the widget, read from the stable widget options
+(API 31+) — hosts that don't report an allocation, like the Pixel and
+A52, keep the unchanged full layout). **What it shows is configurable in
 Settings → Widget**: the grid layout (two columns = dot + name pairs, the
 default, or one column = one row per server) and which servers to show
 (multi-select over the server list, default all; removed servers are

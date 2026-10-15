@@ -23,20 +23,37 @@ import org.robolectric.annotation.Config
  * product surface the launcher consumes) plus the layout structure level
  * (what the launcher's preview inflater will render):
  *
- *  - [widgetInfoDeclaresThe1x1And2x1Offer] — the widget metadata XML is the
+ *  - [widgetInfoDeclaresTheOfferMatrix] — the widget metadata XML is the
  *    machine-consumed artifact the launcher reads to decide what sizes to
  *    offer. Parsed into a typed model (attributes resolved with unit
- *    conversion), it must declare: min 40×80dp, max 190×80dp, minResize
- *    40×80dp, maxResize 190×80dp, resizeMode horizontal ONLY (no vertical stretch,
- *    so the offer is 1×1 and 2×1 only), target cell 1×1, and the preview /
- *    initial layout pointing at `widget_preview`. 190dp is the 2-wide cap:
- *    on the Pixel 7 Pro's ≈121dp cell pitch a 2-wide offer needs
- *    max ≥ 1.5× the pitch. The 40dp width minimum (minWidth AND
- *    minResizeWidth, which must agree) is the AOSP-safe floor: the launcher's
- *    picker draws a 1-column tile only when the declared minimum fits its
- *    column pitch (the Pixel 7 Pro's picker pitch is in [40, 80) dp), so
- *    40dp guarantees the 1-column offer while the 80dp height minimum keeps
- *    the offer at one row — the offer stays exactly 1×1 and 2×1, never 1×2.
+ *    conversion), it must declare: min 40×40dp, max 190×80dp, minResize
+ *    40×40dp, maxResize 190×80dp, resizeMode horizontal AND vertical
+ *    (the actual per-launcher offer is capped by the min/max ranges —
+ *    see below), target cell 1×1, and the preview / initial layout
+ *    pointing at `widget_preview`.
+ *
+ *    The offer matrix the ranges produce (column range from
+ *    ceil(minWidth/pitch) and the 1.5×-pitch 2-wide rule, row range from
+ *    ceil(minHeight/pitch)..ceil(maxHeight/pitch), pitch = the launcher's
+ *    grid pitch):
+ *     - 190dp is the 2-wide cap: on the Pixel 7 Pro's ≈121dp cell pitch a
+ *       2-wide offer needs max ≥ 1.5× the pitch (181.5dp ≤ 190dp);
+ *     - the 40dp width minimum (minWidth AND minResizeWidth, which must
+ *       agree) is the AOSP-safe floor: the launcher's picker draws a
+ *       1-column tile only when the declared minimum fits its column
+ *       pitch (the Pixel 7 Pro's picker pitch is in [40, 80) dp), so
+ *       40dp guarantees the 1-column offer on every launcher;
+ *     - the 40dp height minimum keeps the 1-row minimum on every launcher
+ *       (ceil(40/pitch) = 1 for pitch ≥ 40dp) — including launchers whose
+ *       row pitch is under 80dp (the One UI / Samsung S26 Ultra case,
+ *       where the old 80dp floor forced a 2-row minimum and the locked
+ *       80dp max hid the horizontal offer entirely, leaving only a 1×2
+ *       tile); and
+ *     - the 80dp height max offers 1-2 rows on short-row launchers
+ *       (pitch < 80dp → 1x2/2x2 become placeable, e.g. the S26 Ultra)
+ *       while tall-row launchers (pitch ≥ 80dp — the Pixel ≈116dp, the
+ *       A52 ≈89dp) stay at exactly one row (ceil(80/pitch) = 1), so their
+ *       offer remains 1×1 + 2×1.
  *  - [previewInflatesAndCarriesNoPlainView] — root cause of the 1×1 bug:
  *    the launcher renders `previewLayout` with its RemoteViews-based
  *    preview inflater, which refuses trees carrying classes it does not
@@ -74,7 +91,7 @@ class WidgetPreviewOfferTest {
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp.toFloat(), context().resources.displayMetrics).toInt()
 
     @Test
-    fun widgetInfoDeclaresThe1x1And2x1Offer() {
+    fun widgetInfoDeclaresTheOfferMatrix() {
         val ctx = context()
         val res = ctx.resources
         val raw = res.getXml(R.xml.polex_widget_info)
@@ -91,24 +108,26 @@ class WidgetPreviewOfferTest {
         val a = { name: String -> parser.getAttributeValue("http://schemas.android.com/apk/res/android", name)
             ?: fail("missing android:$name in polex_widget_info.xml") }
 
-        // The offer contract, in dp. Width minimum is the AOSP-safe 40dp
-        // floor (1-column tile on any launcher with a ≥40dp picker pitch);
-        // height minimum is one row on both test devices.
+        // The offer contract, in dp. Both axes floor at the AOSP-safe 40dp
+        // (1-column / 1-row minimum on any launcher with a ≥40dp pitch);
+        // the width caps at 190dp (2 columns) and the height at 80dp
+        // (1-2 rows on short-row launchers, exactly 1 row on tall-row
+        // launchers — see the class KDoc for the offer matrix).
         assertEquals(dpPx(40), a("minWidth").toDpPx(res))
-        assertEquals(dpPx(80), a("minHeight").toDpPx(res))
+        assertEquals(dpPx(40), a("minHeight").toDpPx(res))
         assertEquals(dpPx(190), a("maxWidth").toDpPx(res))
         assertEquals(dpPx(80), a("maxHeight").toDpPx(res))
         assertEquals(dpPx(40), a("minResizeWidth").toDpPx(res))
-        assertEquals(dpPx(80), a("minResizeHeight").toDpPx(res))
+        assertEquals(dpPx(40), a("minResizeHeight").toDpPx(res))
         assertEquals(dpPx(190), a("maxResizeWidth").toDpPx(res))
         assertEquals(dpPx(80), a("maxResizeHeight").toDpPx(res))
 
-        // Horizontal-only stretch: the launcher may offer 2 wide but never
-        // 1x2/2x2. resizeMode is a flag attribute; the runtime reports the
-        // packed value, so assert the bits: RESIZE_HORIZONTAL (0x1) set,
-        // RESIZE_VERTICAL (0x2) clear. (The pre-fix value was 0x3 —
-        // horizontal|vertical, which is what let the launcher stretch the
-        // widget down a row into the 1×2/2×2 shape behind the 1×1 bug.)
+        // The widget may be stretched across columns AND down a row —
+        // the per-launcher offer range is capped by the min/max ranges
+        // above (1-2 x 1 on tall-row launchers, 1-2 x 1-2 on short-row
+        // launchers). resizeMode is a flag attribute; the runtime reports
+        // the packed value, so assert the bits: RESIZE_HORIZONTAL (0x1)
+        // set and RESIZE_VERTICAL (0x2) set.
         val resizeModeRaw = a("resizeMode").trim()
         val resizeMode = if (resizeModeRaw.startsWith("0x", ignoreCase = true)) {
             resizeModeRaw.substring(2).toInt(16)
@@ -120,8 +139,8 @@ class WidgetPreviewOfferTest {
             1, resizeMode and 0x1
         )
         assertEquals(
-            "resizeMode must NOT allow vertical stretching (offer is 1x1/2x1 only)",
-            0, resizeMode and 0x2
+            "resizeMode must allow vertical stretching (1x2/2x2 on short-row launchers)",
+            2, resizeMode and 0x2
         )
 
         // Default placement: one cell.
