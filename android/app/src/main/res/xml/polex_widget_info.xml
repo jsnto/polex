@@ -53,9 +53,10 @@
          whenever the
          allocation holds it — every host that doesn't report an allocation
          (A52 ≈89dp, Pixel ≈116dp, unknown) and every reporting host whose
-         1-row cell is ≥82dp; a sub-80dp allocation — the documented
-         Samsung S26 Ultra One UI short row (pitch under 80dp, pinned
-         conservatively against the 64dp tight case) — renders compact
+         1-row cell is ≥82dp uniform (≥84dp live inventory); a sub-80dp
+         allocation — the documented Samsung S26 Ultra One UI short row
+         (pitch under 80dp, pinned conservatively against the 64dp tight
+         case) — renders compact
          (the secondary freshness line dropped; at the pinned 64dp the
          uniform render is at most 62dp — 3 rows without the freshness
          line — or 60dp with the "+N more" line; wrapped rows price more

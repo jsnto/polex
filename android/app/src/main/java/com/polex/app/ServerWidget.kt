@@ -130,7 +130,8 @@ private val DotRed = Color(0xFFF44336)
  * documented row pitch is under 80 dp — pinned conservatively against the
  * 64 dp tight case, see [WidgetContent]): once the 40dp declared height
  * floor makes a 1-row placement possible there, a 1-row allocation is a
- * sub-80dp row, so the full 82 dp worst case no longer fits by
+ * sub-80dp row, so the full layout's worst case (84 dp for the
+ * six-server live inventory, 82 dp uniform) no longer fits by
  * construction. The budget is the tightest of the host-reported candidate
  * allocations — API 31+ launchers push them into the stable widget
  * options (`OPTION_APPWIDGET_SIZES`, a list of px sizes, delivered via
@@ -171,8 +172,8 @@ private val DotRed = Color(0xFFF44336)
  *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
  *    space between cells, it can't cap name width), so the two-column grid
  *    is built from two equal `defaultWeight` half-Columns per row (the name
- *    budget above caps the name width instead); the app shows the full,
- *    aligned list.
+ *    budget above is the width the name's font fit and wrap price against
+ *    — not a cap on the name); the app shows the full, aligned list.
  */
 class ServerWidget : GlanceAppWidget() {
 
@@ -336,8 +337,9 @@ class ServerWidget : GlanceAppWidget() {
      * smallest of them). Hosts that
      * don't report an allocation (pre-API 31, a host that never pushes
      * sizes, or an error reading the options) get the 89 dp default
-     * budget, which always fits the full layout (82 dp worst case) and
-     * keeps the historical render — as do sub-floor reads: [widgetBudgetDp]
+     * budget, which always fits the full layout (84 dp live-inventory
+     * worst case, 82 dp uniform) and keeps the historical render — as do
+     * sub-floor reads: [widgetBudgetDp]
      * rejects any allocation below the widget's declared 40 dp height floor
      * as implausible (a launcher cannot allocate a widget below its
      * declared minimum). See WidgetContent.kt for the budgets and the
