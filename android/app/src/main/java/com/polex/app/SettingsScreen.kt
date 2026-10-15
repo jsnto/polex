@@ -247,13 +247,25 @@ fun BackendScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var baseUrl by remember { mutableStateOf(Prefs.base(context)) }
     var saved by remember { mutableStateOf(false) }
+    // Result of the post-save connection attempt: null = checking,
+    // true = backend reachable, false = unreachable. Saving the URL is what
+    // kicks off the connection attempt against the (possibly new) backend —
+    // and whenever the dashboard is (re)entered its first check runs
+    // immediately, so a reachable backend un-grays the list and refreshes
+    // the data without further user action.
+    var reachable by remember { mutableStateOf<Boolean?>(null) }
 
     fun saveUrl() {
         Prefs.setBase(context, baseUrl)
         saved = true
-        // Refresh widget cache against the (possibly new) backend.
+        reachable = null
+        // Connection attempt against the (possibly new) backend, plus a
+        // widget cache refresh when it answers.
+        val probed = Api.base(context)
         scope.launch {
-            val r = Api.safe { Api.get("${Api.base(context)}/api/status") }
+            val r = Api.safe { Api.get("$probed/api/status") }
+            if (Api.base(context) != probed) return@launch
+            reachable = r.code != -1
             if (r.code == 200) {
                 Prefs.setCache(context, r.body)
                 ServerWidget.refreshAll(context)
@@ -296,6 +308,24 @@ fun BackendScreen(onBack: () -> Unit) {
                         if (saved) {
                             Spacer(Modifier.width(8.dp))
                             Text("Saved", color = OnlineGreen, style = MaterialTheme.typography.labelSmall)
+                        }
+                        when (reachable) {
+                            null -> if (saved) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Checking…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                            true -> {
+                                Spacer(Modifier.width(8.dp))
+                                Text("Backend reachable", color = OnlineGreen, style = MaterialTheme.typography.labelSmall)
+                            }
+                            false -> {
+                                Spacer(Modifier.width(8.dp))
+                                Text("Backend unreachable", color = OfflineRed, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }

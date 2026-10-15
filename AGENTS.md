@@ -59,10 +59,17 @@ every in-app status poll, and on the widget's system update tick
 - The app stores the token in Prefs after login and re-routes to the login
   screen on a genuine 401. A connection-level failure (backend unreachable,
   `Api.Result.code == -1`) is "disconnected": the token/session are kept and
-  the app silently retries 3× at 2 s — the manual Retry page appears only
-  when every silent retry fails (`Disconnect.screenVisibleAfterCycle`, the
-  sole show/hide decision) — policy lives in
-  `android/.../Disconnect.kt` (shared by dashboard and detail page).
+  each fetch cycle first silently retries 3× at 2 s. The connection state is
+  owned by the supervisor in `android/.../ConnStatus.kt` (`ConnStatus`
+  CHECKING/CONNECTED/DISCONNECTED + `ConnSupervisor`: while disconnected the
+  checks repeat on a 10 s doubling backoff, capped at 60 s, until the backend
+  returns and the dashboard recovers automatically — no user tap or restart):
+  the dashboard shows a header indicator (green/red/gray, content description
+  "Backend connection: valid / …last check failed / …checking") and keeps the
+  server list visible but grayed out and read-only; the server detail page
+  shows the full-screen disconnected/retry page only when every silent retry
+  fails (`Disconnect.screenVisibleAfterCycle`, the sole show/hide decision,
+  `android/.../Disconnect.kt`).
 - The backend version has one source of truth: `const Version` in
   `backend/version.go`, served by `GET /api/version` (behind the token
   middleware). The app shows it beside its own `BuildConfig.VERSION_NAME`
@@ -133,7 +140,7 @@ the emulator's launcher).
 | Change widget            | `android/.../ServerWidget.kt` |
 | Change networking        | `android/.../Api.kt`          |
 | Change shared config     | `android/.../Prefs.kt`        |
-| Change disconnected/retry| `android/.../Disconnect.kt` (RetryTracker, runFetchCycle, screenVisibleAfterCycle, DisconnectedScreen) |
+| Change disconnected/retry| `android/.../ConnStatus.kt` (ConnStatus, ConnSupervisor) + `android/.../Disconnect.kt` (RetryTracker, runFetchCycle, screenVisibleAfterCycle, DisconnectedScreen) |
 
 ## Maintaining this file
 

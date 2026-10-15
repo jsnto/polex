@@ -74,8 +74,8 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     // Remove hit the (now missing) id and surface the backend's error.
     var editEntry by remember { mutableStateOf<SrvEntry?>(null) }
     // Disconnected state (connection-level fetch failure, code -1): shows
-    // the same dedicated full-screen page as the dashboard; the
-    // session/token are left untouched.
+    // the dedicated full-screen page (the dashboard keeps its list, grayed
+    // out, instead); the session/token are left untouched.
     val tracker = remember { RetryTracker() }
     var disconnected by remember { mutableStateOf(false) }
     var retryAttempts by remember { mutableIntStateOf(0) }
