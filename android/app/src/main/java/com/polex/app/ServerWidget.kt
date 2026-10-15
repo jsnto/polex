@@ -87,8 +87,8 @@ private val DotRed = Color(0xFFF44336)
  *
  * Glance notes:
  *  - Column allows at most 10 children: hero (1) + freshness (1) + at most
- *    4 grid rows (the per-mode [widgetMaxCells] budget) + overflow (1) =
- *    at most 7; the grid shows at most [widgetMaxCells] servers (a "+N"
+ *    3 grid rows (the per-mode [widgetMaxCells] budget) + overflow (1) =
+ *    at most 6; the grid shows at most [widgetMaxCells] servers (a "+N"
  *    line for the rest), the app shows the full list.
  *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
  *    space between cells, it can't cap name width), so the two-column grid

@@ -31,16 +31,17 @@ fun normalizeWidgetColumns(raw: Int): Int =
     if (raw == WIDGET_COLUMNS_1) WIDGET_COLUMNS_1 else WIDGET_COLUMNS_2
 
 /**
- * Max servers rendered in the grid per column mode, budgeted to the
- * tightest placement — the 1×1 cell (≈89–94 dp tall on the test devices,
- * holding the 18dp hero + 10dp freshness line + the rows at 12dp each):
+ * Max servers rendered in the grid per column mode, budgeted so the
+ * worst case — 18dp hero + 10dp freshness line + 3 rows at 12dp each +
+ * the 10dp "+N more" line, plus the 8dp vertical padding (82dp) — fits
+ * the tightest 1×1 cell (≈89–94 dp on the test devices) in BOTH modes:
  *  - 2 columns: 6 cells = 3 rows (the original 1×1 budget);
- *  - 1 column: 4 servers = 4 rows (the same vertical budget, one row each).
+ *  - 1 column: 3 servers = 3 rows (one row each).
  * Servers past the budget collapse into the "+N more" line; the app shows
  * the full list.
  */
 fun widgetMaxCells(columns: Int): Int =
-    if (normalizeWidgetColumns(columns) == WIDGET_COLUMNS_1) 4 else 6
+    if (normalizeWidgetColumns(columns) == WIDGET_COLUMNS_1) 3 else 6
 
 /**
  * Which servers the widget renders, given the live (status-cache) list and

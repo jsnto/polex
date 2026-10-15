@@ -1,6 +1,7 @@
 package com.polex.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -9,7 +10,7 @@ import org.junit.Test
  *
  *  - column modes: 2 columns (default) = dot + name pairs per row, 1 column
  *    = one row per server, and the per-mode 1×1 vertical budget (6 cells
- *    vs 4 rows) plus the "+N more" overflow count;
+ *    vs 3 rows) plus the "+N more" overflow count;
  *  - server selection: `null` = all servers (the default), an explicit set
  *    = only those, in live-list order;
  *  - stale-selection handling: ids of removed servers are dropped silently
@@ -56,12 +57,24 @@ class WidgetContentTest {
 
     @Test
     fun budgetsFitThe1x1CellPerMode() {
-        // 2 columns: 6 cells = 3 rows; 1 column: 4 rows — both sized to the
-        // tightest placement (1×1: hero + freshness + the rows at 12dp each).
+        // 2 columns: 6 cells = 3 rows; 1 column: 3 rows.
         assertEquals(6, widgetMaxCells(WIDGET_COLUMNS_2))
-        assertEquals(4, widgetMaxCells(WIDGET_COLUMNS_1))
+        assertEquals(3, widgetMaxCells(WIDGET_COLUMNS_1))
         // Out-of-range modes budget the default (2-column) size.
         assertEquals(6, widgetMaxCells(7))
+        // The per-mode budget's worst case — the row heights from the
+        // render (18dp hero, 10dp freshness, 12dp per row, 10dp for the
+        // "+N more" line, 8dp vertical padding) — must fit the ≈89dp
+        // tightest 1×1 cell (A52), in BOTH modes.
+        for (columns in listOf(WIDGET_COLUMNS_1, WIDGET_COLUMNS_2)) {
+            val budget = widgetMaxCells(columns)
+            val rows = (budget + columns - 1) / columns
+            val worstCaseDp = 18 + 10 + rows * 12 + 10 + 8
+            assertTrue(
+                "$columns-column worst case $worstCaseDp dp exceeds the ≈89dp 1×1 cell",
+                worstCaseDp <= 89,
+            )
+        }
     }
 
     @Test
@@ -84,9 +97,9 @@ class WidgetContentTest {
 
     @Test
     fun oneColumnRowsAreOneServerPerRow() {
-        val live = (1..4).map { srv(it) }
+        val live = (1..3).map { srv(it) }
         val rows = widgetGridRows(live, WIDGET_COLUMNS_1)
-        assertEquals(4, rows.size)
+        assertEquals(3, rows.size)
         assertEquals(live.map { it.id }, rows.map { row -> row.single().id })
     }
 
@@ -98,12 +111,12 @@ class WidgetContentTest {
         assertEquals(3, widgetOverflow(live, WIDGET_COLUMNS_2)) // "+3 more"
 
         val one = widgetGridRows(live, WIDGET_COLUMNS_1)
-        assertEquals(4, one.size) // 4 rows capped
-        assertEquals(5, widgetOverflow(live, WIDGET_COLUMNS_1)) // "+5 more"
+        assertEquals(3, one.size) // 3 rows capped
+        assertEquals(6, widgetOverflow(live, WIDGET_COLUMNS_1)) // "+6 more"
 
         // Nothing past the budget → no overflow line.
         assertEquals(0, widgetOverflow(live.take(6), WIDGET_COLUMNS_2))
-        assertEquals(0, widgetOverflow(live.take(4), WIDGET_COLUMNS_1))
+        assertEquals(0, widgetOverflow(live.take(3), WIDGET_COLUMNS_1))
     }
 
     // --- server selection ---
