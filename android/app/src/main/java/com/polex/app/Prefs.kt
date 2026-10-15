@@ -11,6 +11,8 @@ object Prefs {
     private const val KEY_STATUS_CACHE = "statusCache"
     private const val KEY_STATUS_CACHE_TIME = "statusCacheTime"
     private const val KEY_TOKEN = "authToken"
+    private const val KEY_WIDGET_COLUMNS = "widgetColumns"
+    private const val KEY_WIDGET_SELECTED = "widgetSelectedServers"
 
     // Emulator loopback to the host machine by default.
     // On a physical device change this to your PC's LAN IP, e.g. http://192.168.1.5:8080
@@ -54,5 +56,38 @@ object Prefs {
 
     fun clearToken(context: Context) {
         prefs(context).edit().remove(KEY_TOKEN).apply()
+    }
+
+    // --- widget display settings (app-local; the widget reads them at
+    //     render time, see WidgetContent.kt) ---
+
+    /** The widget server grid's column mode: 1 or 2 (default 2). */
+    fun widgetColumns(context: Context): Int =
+        normalizeWidgetColumns(prefs(context).getInt(KEY_WIDGET_COLUMNS, WIDGET_COLUMNS_DEFAULT))
+
+    fun setWidgetColumns(context: Context, columns: Int) {
+        prefs(context).edit().putInt(KEY_WIDGET_COLUMNS, normalizeWidgetColumns(columns)).apply()
+    }
+
+    /**
+     * Server ids the widget's grid shows; `null` (unset) = all servers
+     * (the default). A stored empty set is a real "show nothing" choice,
+     * distinct from the unset default. Stale ids (removed servers) are
+     * dropped by the widget at render time — never persisted back.
+     */
+    fun widgetSelectedServerIds(context: Context): Set<Int>? {
+        val raw = prefs(context).getStringSet(KEY_WIDGET_SELECTED, null) ?: return null
+        return raw.mapNotNull { it.toIntOrNull() }.toSet()
+    }
+
+    fun setWidgetSelectedServerIds(context: Context, ids: Set<Int>) {
+        prefs(context).edit()
+            .putStringSet(KEY_WIDGET_SELECTED, ids.map { it.toString() }.toSet())
+            .apply()
+    }
+
+    /** Removes the stored selection so it reads back unset (null) = "show all". */
+    fun clearWidgetSelectedServerIds(context: Context) {
+        prefs(context).edit().remove(KEY_WIDGET_SELECTED).apply()
     }
 }

@@ -61,8 +61,10 @@ screen widget.
     the error is also kept as the inline message under the form).
 - **Home screen widget** (Glance) — at-a-glance 1×1 or 2×1 (2 wide,
   1 tall) tile: a colored
-  `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid of
-  servers (offline shown in red). Refreshed in the background roughly every
+  `N/M UP` + `updated HH:mm` hero over a dot + name server grid — two
+  columns (pairs, the default) or one column (one row per server) per the
+  settings screen's **Widget** section, which also selects which servers
+  the widget shows (default: all). Refreshed in the background roughly every
   15 minutes (self-rescheduling inexact alarm via `WidgetAlarm` +
   WorkManager, since the system may defer WorkManager periodic work) and
   on every in-app status refresh.
@@ -141,12 +143,24 @@ screen. It appears empty until the first background refresh succeeds or you
 open the app once (the app refreshes the widget on every status poll).
 
 The widget is offered at 1×1 (the default placement size) and 2×1 (2 wide,
-1 tall — the grid's two columns widen across the extra cell; server names
-stay truncated to the same 4-char budget at both sizes). It is a colored `N/M UP` hero with the
+1 tall — in the two-column layout the grid's pairs widen across the extra
+cell; server names stay truncated to the same 4-char budget at both sizes).
+Its declared minimum width is 40dp — the AOSP-safe floor that lets a
+launcher offer the 1-column tile when its picker column pitch is ≥40dp
+(the Pixel 7 Pro's picker pitch is in [40, 80) dp; a placed widget is
+always at least one home-grid column wide, ≈94 dp on the Pixel). It is a
+colored `N/M UP` hero with the
 data-freshness
-time under it ("updated 14:32"), then a two-column grid of servers
+time under it ("updated 14:32"), then a grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
 doesn't fit). **Tapping it opens the app**.
+
+**Settings → Widget** configures what the widget shows: the grid layout
+(2 columns = dot + name pairs, the default, or 1 column = one row per
+server) and which servers to show (a multi-select over the server list,
+default all; a removed server is dropped from the selection silently). A
+change re-renders the widget immediately. Both settings apply to the 1×1
+and 2×1 renders alike.
 
 **Windows:** see `../scripts/windows/build-apk.ps1` and
 `../scripts/windows/test-emulator.ps1` (Docker Desktop).

@@ -28,8 +28,10 @@ Home-lab server status + Wake-on-LAN, from your phone.
     dialog ("Power off <server>?" / "Send wake to <server>?"); tapping a
     server opens a detail page with its live status and editable settings;
   - settings screen to configure the backend URL and add/remove/reorder
-    servers (name, IP, MAC, check port, and the check method — TCP or ping).
-    The server list supports **drag-and-drop reordering**; all changes are
+    servers (name, IP, MAC, check port, and the check method — TCP or ping),
+    plus the **widget display** (grid layout — 1 or 2 columns — and which
+    servers the widget shows; defaults: 2 columns, all servers). The server
+    list supports **drag-and-drop reordering**; all changes are
     POSTed to the backend. The menu footer shows the **app version**
     (`BuildConfig.VERSION_NAME`) and the **backend version** (`GET
     /api/version`); when they differ, the lower (outdated) side is
@@ -38,8 +40,11 @@ Home-lab server status + Wake-on-LAN, from your phone.
     `android/.../Versions.kt`, tests in `VersionsTest.kt`);
   - a **home screen widget** (Glance) — a compact 1×1 or 2×1 (2 wide,
     1 tall) tile: a colored
-    `N/M UP` + `updated HH:mm` hero over a two-column dot + name grid
-    (offline servers in red, `+N more` overflow); tapping it opens the
+    `N/M UP` + `updated HH:mm` hero over a dot + name server grid — two
+    columns (dot + name pairs, the default) or one column (one row per
+    server) per the **Widget** settings, which also choose which servers
+    are listed (default: all); offline servers in red, `+N more`
+    overflow. Tapping it opens the
     app. A background job (WorkManager + an inexact alarm, since the
     system may defer WorkManager periodic work) refreshes the widget
     roughly every 15 minutes, and the widget also refreshes whenever
@@ -285,9 +290,18 @@ Long-press the home screen → Widgets → **PoleX** → drag it onto the home
 screen. It is offered at 1×1 (default) and 2×1 (2 wide, 1 tall — stretch it
 when placing or resizing it; it can't be resized vertically): a colored
 `N/M UP` hero with the data-freshness
-time under it ("updated 14:32"), then a two-column grid of servers
+time under it ("updated 14:32"), then a grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
-doesn't fit). **Tapping it opens the
+doesn't fit). The widget's declared minimum width is 40dp — the AOSP-safe
+floor that lets launchers with a ≥40dp picker column pitch offer the
+1-column (1×1) tile (the Pixel 7 Pro's picker pitch is in [40, 80) dp);
+a placed widget is always at least one home-grid column wide (≈94 dp on
+the Pixel), where the content fits. **What it shows is configurable in
+Settings → Widget**: the grid layout (two columns = dot + name pairs, the
+default, or one column = one row per server) and which servers to show
+(multi-select over the server list, default all; removed servers are
+dropped from the selection silently). A change re-renders the widget
+immediately. **Tapping it opens the
 app**. It refreshes roughly every 15 minutes in the background (a
 self-rescheduling inexact alarm + a WorkManager job, because the system
 can defer WorkManager's periodic work) and on every app status refresh
