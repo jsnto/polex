@@ -202,7 +202,10 @@ errors. Prefer that over manual runs when verifying app changes.
     over a 1- or 2-column dot+name grid (the Prefs display mode, default 2)
     with `+N more` overflow. Keep it that way.
   - `Text` in 1.1.0 has **no `overflow` parameter** (only `text`, `modifier`,
-    `style`, `maxLines`) — pre-truncate long strings in Kotlin instead.
+    `style`, `maxLines`) — the widget's full-name render handles long names
+    instead: it sets `maxLines` to the name's MEASURED wrapped line count so
+    the name wraps in its row (priced into the row height) rather than
+    truncating (see `WidgetContent.kt`).
     `Box`'s alignment param is `contentAlignment`, not `alignment`.
   - There is **no vertical spacing between server rows** (rows are placed
     back-to-back; no per-row padding). Glance `TextStyle` has no
