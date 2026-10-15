@@ -43,8 +43,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -54,6 +57,27 @@ val OnlineGreen = Color(0xFF4CAF50)
 val OfflineRed = Color(0xFFF44336)
 val WarnAmber = Color(0xFFFB8C00)   // version mismatch highlight
 
+/** List opacity while the backend is unreachable (grayed out, still visible). */
+private const val GRAYED_OUT_ALPHA = 0.4f
+
+/**
+ * The dashboard header's connection indicator: a small status light that is
+ * green when the last check reached the backend, red when the last check
+ * failed, and gray while the first check is pending. Color and content
+ * description both come from the single [ConnStatus] state the supervisor
+ * maintains (see ConnStatus.kt), so the light, the accessibility text, and
+ * the list's gray-out can never disagree.
+ */
+@Composable
+fun ConnectionIndicator(status: ConnStatus, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(14.dp)
+            .semantics { contentDescription = status.contentDescription() }
+            .background(status.indicatorColor(), CircleShape),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError: () -> Unit) {
@@ -61,16 +85,21 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
-    var items by remember { mutableStateOf<List<SrvStatus>>(emptyList()) }
+    // Seeded from the widget's cache: while the backend is unreachable the
+    // list shows the last known state (grayed out) instead of going empty.
+    var items by remember { mutableStateOf<List<SrvStatus>>(cachedStatusList(context)) }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     // The single power control is in flight (a wake packet or a power-off
     // command is being sent).
     var powerBusy by remember { mutableStateOf(false) }
-    // Disconnected state (connection-level fetch failure, code -1): shows
-    // the dedicated full-screen page; the session/token are left untouched.
+    // Connection supervisor: the single source of truth for the header
+    // indicator (color + content description), the list's gray-out, and the
+    // backoff between checks while the backend is unreachable. Connection
+    // failures never touch the token; only a real 401 re-auths.
+    val supervisor = remember { ConnSupervisor() }
+    var conn by remember { mutableStateOf(ConnStatus.CHECKING) }
     val tracker = remember { RetryTracker() }
-    var disconnected by remember { mutableStateOf(false) }
     var retryAttempts by remember { mutableIntStateOf(0) }
     // True while a fetch cycle (auto-retries) is in flight; guards against
     // overlapping cycles from the 15 s loop, toolbar, pull-to-refresh.
@@ -95,18 +124,20 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
         val result = runFetchCycle(
             tracker,
             onAttempt = { n ->
-                // Silent while the app is connected: the screen only appears
-                // after the cycle exhausts (below). While it is already
-                // visible (a manual-Retry cycle) keep its live progress.
-                if (disconnected) retryAttempts = n
+                // Silent while the app is connected: progress only updates
+                // once the list is already grayed out (a retry cycle while
+                // the backend is still down).
+                if (conn == ConnStatus.DISCONNECTED) retryAttempts = n
             },
         ) { fetchStatus() }
         cycling = false
+        // The supervisor owns the connection state: the indicator, its
+        // content description, and the gray-out all read this one value.
+        conn = supervisor.recordOutcome(result.code)
         when {
             result.code == 200 -> {
                 tracker.reset()
                 retryAttempts = 0
-                disconnected = false
                 items = parseStatusArray(result.body)
                 error = ""
                 // Keep the widget's cache fresh too.
@@ -115,19 +146,17 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             }
             Disconnect.requiresReauth(result.code) -> {
                 // Token rejected by a REACHABLE backend: back to login.
-                disconnected = false
                 onAuthError()
             }
-            // The screen appears only when the cycle ends at the connection
-            // level — i.e. only after every silent auto-retry failed. Its
-            // Retry button (or the toolbar/pull-to-refresh) starts a new cycle.
-            Disconnect.screenVisibleAfterCycle(result.code) -> {
-                disconnected = true
+            Disconnect.isDisconnected(result.code) -> {
+                // The list stays visible but grayed out (see below); the
+                // loop keeps re-checking on the supervisor's backoff until
+                // the backend returns, which un-grays the list and refresh
+                // the data automatically.
                 retryAttempts = tracker.attempts
             }
             else -> {
                 // Reachable backend, other error: keep the inline error bar.
-                disconnected = false
                 error = "Server error ${result.code}: ${friendlyError(result.body)}"
             }
         }
@@ -154,12 +183,26 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
         }
     }
 
-    // Auto-refresh every 15s (paused while disconnected: recovery happens
-    // via the Retry button / toolbar / pull-to-refresh instead).
+    // Auto-refresh: the normal 15 s poll while the backend is reachable;
+    // while disconnected the supervisor's backoff (10 s doubling, capped at
+    // 60 s) decides the next check instead. That continuous checking is what
+    // makes a returning backend recover the UI automatically — the next
+    // successful fetch un-grays the list and refreshes the data, with no
+    // user tap or app restart. A manual cycle (toolbar / pull-to-refresh)
+    // in flight is left alone; the loop waits for it to finish.
     LaunchedEffect(Unit) {
         while (true) {
-            if (!disconnected) refresh()
-            delay(15_000)
+            if (cycling) {
+                delay(1_000)
+                continue
+            }
+            cycling = true
+            retryAttempts = 0
+            runRefresh()
+            delay(
+                if (conn == ConnStatus.DISCONNECTED) supervisor.nextCheckDelayMs()
+                else 15_000L,
+            )
         }
     }
 
@@ -189,6 +232,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             TopAppBar(
                 title = { Text("PoleX") },
                 actions = {
+                    ConnectionIndicator(conn, Modifier.padding(end = 4.dp))
                     IconButton(onClick = { refresh() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
@@ -199,15 +243,10 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             )
         },
     ) { pad ->
-        if (disconnected) {
-            DisconnectedScreen(
-                attempts = retryAttempts,
-                retrying = cycling,
-                onRetry = { refresh() },
-                modifier = Modifier.padding(pad),
-            )
-            return@Scaffold
-        }
+        // While disconnected the list is never removed: it stays visible,
+        // grayed out and read-only (last known state), while the supervisor
+        // keeps re-checking in the background until the backend returns.
+        val grayed = conn.listGrayedOut()
         // Plain (non-Lazy) Column inside a pullToRefresh Box: unlike a
         // LazyColumn, a short list that fits on screen still reports the
         // unconsumed downward drag, so pull-to-refresh works with a few
@@ -223,10 +262,27 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
+                    .padding(12.dp)
+                    .alpha(if (grayed) GRAYED_OUT_ALPHA else 1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (error.isNotEmpty()) {
+                if (grayed) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = OfflineRed.copy(alpha = 0.12f)),
+                    ) {
+                        Text(
+                            text = if (cycling) {
+                                "Backend unreachable — retrying…"
+                            } else {
+                                "Backend unreachable — showing the last known state. Retrying automatically; if the backend moved, change its URL in settings."
+                            },
+                            modifier = Modifier.padding(14.dp),
+                            color = Color(0xFFF87171),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                } else if (error.isNotEmpty()) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = OfflineRed.copy(alpha = 0.12f)),
@@ -285,6 +341,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                         busy = powerBusy,
                         onPower = { powerTarget = s },
                         onClick = { onOpenServer(s.id) },
+                        enabled = !grayed,
                     )
                 }
             }
@@ -338,8 +395,11 @@ fun ServerCard(
     busy: Boolean,
     onPower: () -> Unit,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    // `enabled = false` while the backend is unreachable: the card stays on
+    // screen (grayed out by the parent) but stops responding to taps.
+    Card(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -372,9 +432,10 @@ fun ServerCard(
             }
             // The single power toggle: wake when offline, power off when
             // online — dimmed for the unavailable direction (no MAC / no SSH
-            // config), like the old wake/shutdown buttons.
+            // config), like the old wake/shutdown buttons; disabled while
+            // the backend is unreachable.
             PowerButton(
-                enabled = (if (s.online) s.sshConfigured() else s.mac.isNotEmpty()) && !busy,
+                enabled = (if (s.online) s.sshConfigured() else s.mac.isNotEmpty()) && !busy && enabled,
                 busy = busy,
                 online = s.online,
                 onClick = onPower,

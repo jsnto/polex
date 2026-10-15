@@ -26,7 +26,18 @@ Home-lab server status + Wake-on-LAN, from your phone.
     configured) and **offline → power on** (a Wake-on-LAN magic packet; dimmed
     when no MAC is configured) — each direction asks for confirmation in a
     dialog ("Power off <server>?" / "Send wake to <server>?"); tapping a
-    server opens a detail page with its live status and editable settings;
+    server opens a detail page with its live status and editable settings.
+    The header carries a **connection indicator** — green when the last
+    check reached the backend, red when the last check failed, gray while
+    the first check is pending (content description "Backend connection:
+    valid" / "…last check failed" / "…checking"). When the backend is
+    unreachable the server list stays visible but **grayed out and
+    read-only** (the last known state, seeded from the widget cache), and
+    the app keeps re-checking automatically with a growing backoff
+    (10 s, doubling per failed check, capped at 60 s) — when the backend
+    returns the list un-grays and refreshes with no user action or app
+    restart; the backend URL stays editable in settings at all times, and
+    saving it starts a connection attempt against the new URL;
   - settings screen to configure the backend URL and add/remove/reorder
     servers (name, IP, MAC, check port, and the check method — TCP or ping),
     plus the **widget display** (grid layout — 1 or 2 columns — and which
@@ -205,7 +216,10 @@ Honest limits:
   path for that case.
 - **Self-shutdown:** if the backend host is itself one of the servers,
   "command accepted; backend unreachable" is *expected* — the backend powers
-  off mid-request and the app's disconnected/retry page appears. The
+  off mid-request and the app's connection indicator turns red (the
+  dashboard list stays visible but grayed out and read-only while it
+  auto-retries; the server detail page shows the disconnected/retry screen).
+  The
   `lastShutdownAt` record is best-effort here: written after the run
   returns, in-memory only (cleared on restart), so it is often never
   written at all.
