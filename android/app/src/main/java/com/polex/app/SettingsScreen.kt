@@ -261,8 +261,10 @@ fun BackendScreen(onBack: () -> Unit) {
         reachable = null
         // Connection attempt against the (possibly new) backend, plus a
         // widget cache refresh when it answers.
+        val probed = Api.base(context)
         scope.launch {
-            val r = Api.safe { Api.get("${Api.base(context)}/api/status") }
+            val r = Api.safe { Api.get("$probed/api/status") }
+            if (Api.base(context) != probed) return@launch
             reachable = r.code != -1
             if (r.code == 200) {
                 Prefs.setCache(context, r.body)

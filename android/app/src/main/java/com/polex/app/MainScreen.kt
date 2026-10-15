@@ -36,7 +36,6 @@ import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -100,7 +99,6 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     val supervisor = remember { ConnSupervisor() }
     var conn by remember { mutableStateOf(ConnStatus.CHECKING) }
     val tracker = remember { RetryTracker() }
-    var retryAttempts by remember { mutableIntStateOf(0) }
     // True while a fetch cycle (auto-retries) is in flight; guards against
     // overlapping cycles from the 15 s loop, toolbar, pull-to-refresh.
     var cycling by remember { mutableStateOf(false) }
@@ -121,15 +119,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     // connection-level failure, then applies the final result to the UI.
     // Connection failures never touch the token; only a real 401 re-auths.
     suspend fun runRefresh() {
-        val result = runFetchCycle(
-            tracker,
-            onAttempt = { n ->
-                // Silent while the app is connected: progress only updates
-                // once the list is already grayed out (a retry cycle while
-                // the backend is still down).
-                if (conn == ConnStatus.DISCONNECTED) retryAttempts = n
-            },
-        ) { fetchStatus() }
+        val result = runFetchCycle(tracker) { fetchStatus() }
         cycling = false
         // The supervisor owns the connection state: the indicator, its
         // content description, and the gray-out all read this one value.
@@ -137,7 +127,6 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
         when {
             result.code == 200 -> {
                 tracker.reset()
-                retryAttempts = 0
                 items = parseStatusArray(result.body)
                 error = ""
                 // Keep the widget's cache fresh too.
@@ -153,7 +142,6 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 // loop keeps re-checking on the supervisor's backoff until
                 // the backend returns, which un-grays the list and refresh
                 // the data automatically.
-                retryAttempts = tracker.attempts
             }
             else -> {
                 // Reachable backend, other error: keep the inline error bar.
@@ -166,7 +154,6 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     fun refresh() {
         if (cycling) return
         cycling = true
-        retryAttempts = 0
         scope.launch { runRefresh() }
     }
 
@@ -197,7 +184,6 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 continue
             }
             cycling = true
-            retryAttempts = 0
             runRefresh()
             delay(
                 if (conn == ConnStatus.DISCONNECTED) supervisor.nextCheckDelayMs()
@@ -262,8 +248,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(12.dp)
-                    .alpha(if (grayed) GRAYED_OUT_ALPHA else 1f),
+                    .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (grayed) {
@@ -295,54 +280,61 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                         )
                     }
                 }
-                if (items.isNotEmpty()) {
-                    val up = items.count { it.online }
-                    val latest = items.mapNotNull { parseEpoch(it.lastChecked) }.maxOrNull()
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = (if (up == items.size) OnlineGreen else OfflineRed).copy(alpha = 0.12f),
-                        ),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(if (grayed) GRAYED_OUT_ALPHA else 1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (items.isNotEmpty()) {
+                        val up = items.count { it.online }
+                        val latest = items.mapNotNull { parseEpoch(it.lastChecked) }.maxOrNull()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = (if (up == items.size) OnlineGreen else OfflineRed).copy(alpha = 0.12f),
+                            ),
                         ) {
-                            Text(
-                                text = "●",
-                                color = if (up == items.size) OnlineGreen else OfflineRed,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "$up of ${items.size} online",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                text = if (latest != null) "checked ${relativeTime(latest)}" else "not checked yet",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "●",
+                                    color = if (up == items.size) OnlineGreen else OfflineRed,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "$up of ${items.size} online",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    text = if (latest != null) "checked ${relativeTime(latest)}" else "not checked yet",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
-                }
-                if (items.isEmpty() && !loading && error.isEmpty()) {
-                    Text(
-                        "No servers configured.\nOpen settings to add servers.",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-                items.forEach { s ->
-                    ServerCard(
-                        s,
-                        busy = powerBusy,
-                        onPower = { powerTarget = s },
-                        onClick = { onOpenServer(s.id) },
-                        enabled = !grayed,
-                    )
+                    if (items.isEmpty() && !loading && error.isEmpty()) {
+                        Text(
+                            "No servers configured.\nOpen settings to add servers.",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                    items.forEach { s ->
+                        ServerCard(
+                            s,
+                            busy = powerBusy,
+                            onPower = { powerTarget = s },
+                            onClick = { onOpenServer(s.id) },
+                            enabled = !grayed,
+                        )
+                    }
                 }
             }
         }
