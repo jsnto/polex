@@ -7,7 +7,8 @@ import org.junit.Test
 
 /**
  * Widget display settings — the render logic (WidgetContent.kt) the widget
- * applies in BOTH the 1×1 and 2×1 placements:
+ * applies at every offered placement (1×1/2×1 everywhere, plus 1×2/2×2 on
+ * short-row launchers):
  *
  *  - column modes: 2 columns (default) = dot + name pairs per row, 1 column
  *    = one row per server, and the per-mode 1×1 vertical budget (6 cells
@@ -258,6 +259,56 @@ class WidgetContentTest {
         // A degenerate non-positive allocation is treated as absent.
         assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(0))
         assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(-12))
+    }
+
+    @Test
+    fun everyOfferedAllocationRendersWithinBudget() {
+        // The offer matrix can produce exactly these allocations: a 1-row
+        // cell of 40..80dp (the declared height range) or a 2-row cell of
+        // 2×pitch on a short-row launcher (pitch 40..79dp → 80..158dp).
+        // Every layout decision at any of them must fit the allocation —
+        // "the content must reflow and render cleanly at EVERY offered
+        // size": no clip anywhere in the offer range, in any row/overflow
+        // shape.
+        val budgets = (40..80).toSet() + (40..79).map { 2 * it }.toSet()
+        for (budget in budgets) {
+            for (rows in 0..3) {
+                for (overflow in listOf(false, true)) {
+                    val layout = widgetVerticalLayout(rows, overflow, budget)
+                    assertTrue(
+                        "$rows rows / overflow=$overflow at a ${budget}dp allocation: " +
+                            "the ${layout.allocatedHeightDp}dp render exceeds the allocation",
+                        layout.allocatedHeightDp <= budget,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun twoRowCellAllocationsKeepTheFullLayout() {
+        // A 2-row offer (short-row launchers only) allocates 2×pitch ≥
+        // 2×40dp = 80dp (the 40dp minResize floor). At ≥82dp the full
+        // worst case (82dp) fits, so the full layout — freshness line
+        // kept, no dropped rows — is rendered at every 2-row allocation;
+        // at the 80-81dp edge only the shapes that don't fit drop to the
+        // 72dp compact worst case. It always fits.
+        for (pitch in 40..79) {
+            val budget = 2 * pitch
+            for (rows in 0..3) {
+                for (overflow in listOf(false, true)) {
+                    val layout = widgetVerticalLayout(rows, overflow, budget)
+                    assertTrue(
+                        "2-row ${budget}dp allocation: ${layout.allocatedHeightDp}dp render exceeds it",
+                        layout.allocatedHeightDp <= budget,
+                    )
+                    if (budget >= 82) {
+                        assertEquals("$budget dp: full layout must be kept", rows, layout.gridRows)
+                        assertTrue("$budget dp: full layout must keep the freshness line", layout.showFreshness)
+                    }
+                }
+            }
+        }
     }
 
     // --- server selection ---

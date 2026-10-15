@@ -293,6 +293,11 @@ class ServerWidget : GlanceAppWidget() {
      * keeps the historical render. See WidgetContent.kt for the budgets
      * and the pinned arithmetic.
      */
+    // `AppWidgetId` is the only `GlanceId` a `GlanceAppWidget` receives, but
+    // it is `@RestrictTo(LIBRARY_GROUP)` in Glance 1.1.0 and there is no
+    // stable API to read the widget id from the `GlanceId` — the cast is the
+    // established workaround (lint: RestrictedApi).
+    @Suppress("RestrictedApi")
     private fun hostCellBudgetDp(context: Context, glanceId: GlanceId): Int {
         val id = (glanceId as? AppWidgetId)?.appWidgetId
             ?: return WIDGET_HOST_BUDGET_DEFAULT_DP

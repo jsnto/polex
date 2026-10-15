@@ -171,8 +171,8 @@ doesn't fit). **Tapping it opens the app**.
 (2 columns = dot + name pairs, the default, or 1 column = one row per
 server) and which servers to show (a multi-select over the server list,
 default all; a removed server is dropped from the selection silently). A
-change re-renders the widget immediately. Both settings apply to the 1×1
-and 2×1 renders alike.
+change re-renders the widget immediately. Both settings apply to every
+offered render alike.
 
 **Windows:** see `../scripts/windows/build-apk.ps1` and
 `../scripts/windows/test-emulator.ps1` (Docker Desktop).

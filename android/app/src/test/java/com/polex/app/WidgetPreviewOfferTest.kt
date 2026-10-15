@@ -17,9 +17,12 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /**
- * The 1×1/2×1 widget offer, checked at the declarative contract level (the
+ * The widget offer matrix (1×1/2×1 on every launcher, plus 1×2/2×2 on
+ * short-row launchers), checked at the declarative contract level (the
  * product surface the launcher consumes) plus the layout structure level
  * (what the launcher's preview inflater will render):
  *
@@ -70,6 +73,18 @@ import org.robolectric.annotation.Config
  *    are equal weighted halves (weight 1, 0dp width), so the same layout
  *    reflows across the wider 2×1 offer instead of anchoring a fixed-width
  *    cell — the structure the Glance content layout (ServerWidget) uses.
+ *  - [offerRangesPerLauncherClassMatchTheDocumentedMatrix] — the offer
+ *    RANGES the metadata actually produces, computed with the launcher's
+ *    grid math (column range from ceil(minWidth/pitch) and the 1.5×-pitch
+ *    2-wide rule, row range from ceil(minHeight/pitch)..ceil(maxHeight/
+ *    pitch)) against the parsed metadata: a short-row launcher (the S26
+ *    Ultra's One UI, pitch 64dp — the documented tight case) offers 1-2 ×
+ *    1-2 (1×1, 2×1, 1×2 and 2×2 all placeable — the 1×1/2×1 offers the
+ *    S26 picker was missing), and tall-row launchers (Pixel ≈116/121dp,
+ *    A52 ≈89dp) stay at 1-2 × exactly 1 (1×1 + 2×1, unchanged — the
+ *    Pixel regression). The reported S26 failure mode (1×2-only) is
+ *    reproduced against the OLD metadata values (80dp height floor) inside
+ *    the test, so it fails before the floor change and passes after.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -158,6 +173,94 @@ class WidgetPreviewOfferTest {
         assertEquals(previewId, a("initialLayout").resolvedId())
         assertEquals(previewId, a("previewLayout").resolvedId())
     }
+
+    @Test
+    fun offerRangesPerLauncherClassMatchTheDocumentedMatrix() {
+        val res = context().resources
+        val raw = res.getXml(R.xml.polex_widget_info)
+        // Depending on the framework build, getXml() returns either the
+        // parser itself or a block exposing it — handle both.
+        val parser: XmlResourceParser = when {
+            raw is XmlResourceParser -> raw
+            else -> raw.javaClass.getMethod("getParser").invoke(raw) as XmlResourceParser
+        }
+        while (parser.eventType != XmlResourceParser.START_TAG) parser.next()
+        assertEquals("appwidget-provider", parser.name)
+
+        val a = { name: String -> parser.getAttributeValue("http://schemas.android.com/apk/res/android", name)
+            ?: fail("missing android:$name in polex_widget_info.xml") }
+
+        // The declared offer ranges in dp (typed values, not strings).
+        val minW = a("minWidth").dpValue()
+        val minH = a("minHeight").dpValue()
+        val maxW = a("maxWidth").dpValue()
+        val maxH = a("maxHeight").dpValue()
+
+        // The launcher's grid math (the documented model — see the metadata
+        // comment): column range ceil(minWidth/pitch) .. 2 (a 2-wide offer
+        // exists when maxWidth ≥ 1.5× the pitch), row range
+        // ceil(minHeight/pitch) .. ceil(maxHeight/pitch). Both stretch bits
+        // must be set for the row range to be offerable at all.
+        val resizeMode = a("resizeMode").trim().let {
+            if (it.startsWith("0x", ignoreCase = true)) it.substring(2).toInt(16)
+            else it.toIntOrNull() ?: fail("unparseable resizeMode: $it")
+        }
+        assertTrue("both resize bits must be set for 1x2/2x2 offers", resizeMode and 0x3 == 0x3)
+
+        val offer = { pitch: Int ->
+            val colMin = ceil(minW / pitch.toFloat()).toInt()
+            val colMax = if (maxW >= 1.5f * pitch) 2 else 1
+            val rowMin = ceil(minH / pitch.toFloat()).toInt()
+            val rowMax = ceil(maxH / pitch.toFloat()).toInt()
+            (colMin..colMax) to (rowMin..rowMax)
+        }
+
+        // The S26 Ultra One UI short row (pitch 64dp — the documented tight
+        // case): 1-2 columns × 1-2 rows — 1×1, 2×1, 1×2 AND 2×2 are all
+        // placeable. The 1×1 and 2×1 offers are the ones the S26 picker
+        // was missing before this change.
+        val (s26Cols, s26Rows) = offer(64)
+        assertEquals("S26 column range", 1..2, s26Cols)
+        assertEquals("S26 row range", 1..2, s26Rows)
+        // The reported failure, reproduced against the OLD metadata (80dp
+        // height floor AND 80dp max): a 64dp short row's minimum is two
+        // rows and its maximum is two rows — the row range locks at 2, so
+        // the 1-row (1×1/2×1) offers never appear (the 1×2-only picker).
+        val oldRowMin = ceil(80f / 64f).toInt()
+        val oldRowMax = ceil(80f / 64f).toInt()
+        assertEquals("old metadata's S26 row range must lock at two rows", 2..2, oldRowMin..oldRowMax)
+        // The new 40dp floor un-locks it: the 1-row minimum appears.
+        assertEquals(1, ceil(40f / 64f).toInt())
+        // The AOSP-safe 40dp pitch floor: still 1-2 × 1-2.
+        assertEquals(1..2, offer(40).first)
+        assertEquals(1..2, offer(40).second)
+
+        // Every short-row pitch in the offer range (40..79dp): a 2-row
+        // offer exists (row range ends at 2) and its allocation 2×pitch ≥
+        // 2×40dp = 80dp, so the content's fit rules always fit it (the
+        // 2×pitch ≥ 80dp → full-or-compact pin lives in WidgetContentTest).
+        for (pitch in 40..79) {
+            val (cols, rows) = offer(pitch)
+            assertEquals("$pitch dp: 2-row offer must exist on short-row launchers", 2, rows.last)
+            assertTrue("$pitch dp: 2-row allocation must be ≥80dp", 2 * pitch >= 80)
+            assertTrue("$pitch dp: 1-column offer must survive", cols.first == 1)
+        }
+
+        // Tall-row launchers (pitch ≥ 80dp — the Pixel 7 Pro ≈116/121dp
+        // picker pitch, the A52 ≈89dp): exactly one row is offered (no
+        // 1×2/2×2) and the 2-wide offer survives (190dp ≥ 1.5× the pitch),
+        // so their offer stays 1×1 + 2×1 — the Pixel 7 Pro regression.
+        for (pitch in listOf(80, 89, 116, 121)) {
+            val (cols, rows) = offer(pitch)
+            assertEquals("$pitch dp: column range must stay 1-2", 1..2, cols)
+            assertEquals("$pitch dp: tall-row launchers must stay at exactly one row", 1..1, rows)
+        }
+    }
+
+    /** "40dp"/"40dip"/"40.0dip" → 40 (the declared dimension value in dp). */
+    private fun String.dpValue(): Int =
+        trim().trimEnd('d', 'i', 'p').toFloatOrNull()?.roundToInt()
+            ?: fail("unparseable dp value: $this")
 
     /** "@[2131362962]" / "@2131362962" (runtime-formatted resource reference) → its id. */
     private fun String.resolvedId(): Int {

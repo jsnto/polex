@@ -195,8 +195,9 @@ errors. Prefer that over manual runs when verifying app changes.
     `androidx.glance.appwidget.action.actionStartActivity(Intent(context,
     MainActivity::class.java))` on the root Column's modifier. The widget is
     intentionally compact — default 1×1 cell (`targetCellWidth/Height = 1` in
-    `res/xml/polex_widget_info.xml`), offered at 2×1 as well (horizontal
-    resize only): colored `N/M UP` hero + freshness line
+    `res/xml/polex_widget_info.xml`), offered at 2×1 as well (and at
+    1×2/2×2 on short-row launchers — `resizeMode=horizontal|vertical`):
+    colored `N/M UP` hero + freshness line
     over a 1- or 2-column dot+name grid (the Prefs display mode, default 2)
     with `+N more` overflow. Keep it that way.
   - `Text` in 1.1.0 has **no `overflow` parameter** (only `text`, `modifier`,
@@ -205,7 +206,8 @@ errors. Prefer that over manual runs when verifying app changes.
   - There is **no vertical spacing between server rows** (rows are placed
     back-to-back; no per-row padding). Glance `TextStyle` has no
     `lineHeight`, so the row-to-row gap is controlled by the fixed dp row
-    heights (`heroHeight` 18 / `freshHeight` 10 / `cellHeight` 12 dp in
+    heights (the `WIDGET_*_HEIGHT_DP` constants in `WidgetContent.kt` —
+    hero 18 / freshness 10 / grid row 12 / overflow 10 dp — read by
     `ServerWidget.kt`) — don't add per-row `padding`.
 - Res files: `res/xml/polex_widget_info.xml` (widget metadata),
   `res/layout/widget_preview.xml` (widget preview), launcher icon is adaptive
