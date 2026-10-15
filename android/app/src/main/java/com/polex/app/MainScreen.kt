@@ -87,6 +87,9 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
     // Seeded from the widget's cache: while the backend is unreachable the
     // list shows the last known state (grayed out) instead of going empty.
     var items by remember { mutableStateOf<List<SrvStatus>>(cachedStatusList(context)) }
+    // The seeded list is not fresh data until a 200 has been applied by this
+    // composition; while it is shown, the list stays grayed out and read-only.
+    var stale by remember { mutableStateOf(items.isNotEmpty()) }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     // The single power control is in flight (a wake packet or a power-off
@@ -128,6 +131,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
             result.code == 200 -> {
                 tracker.reset()
                 items = parseStatusArray(result.body)
+                stale = false
                 error = ""
                 // Keep the widget's cache fresh too.
                 Prefs.setCache(context, result.body)
@@ -232,7 +236,10 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
         // While disconnected the list is never removed: it stays visible,
         // grayed out and read-only (last known state), while the supervisor
         // keeps re-checking in the background until the backend returns.
-        val grayed = conn.listGrayedOut()
+        // A freshly re-entered composition still shows seeded cache data its
+        // own checks have not verified yet, so it starts grayed as well.
+        val disconnected = conn.listGrayedOut()
+        val grayed = stale || disconnected
         // Plain (non-Lazy) Column inside a pullToRefresh Box: unlike a
         // LazyColumn, a short list that fits on screen still reports the
         // unconsumed downward drag, so pull-to-refresh works with a few
@@ -251,7 +258,7 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (grayed) {
+                if (disconnected) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = OfflineRed.copy(alpha = 0.12f)),
