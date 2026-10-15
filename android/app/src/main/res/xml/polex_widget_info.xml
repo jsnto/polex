@@ -41,16 +41,26 @@
        sub-48dp allocation drove the pre-guard fit to the hero-only render
        — "N/M UP" + "+N more" with zero server rows). The render is
        span-agnostic (the widget cannot read its own span from the stable
-       options API), so every layout is pinned to the tightest 1x1 cell:
-       * 1-row cell: the full layout (worst case 82dp) is kept whenever the
+       options API), so every layout is pinned to the tightest 1x1 cell.
+       The same span-agnostic pin applies to WIDTH: server names render in
+       full (no ellipsis) against the tightest 89dp cell width (66dp
+       1-column / 27dp 2-column) — the font scales 10sp→6sp, and a name
+       that overruns wraps, growing its row (ceil(1.5 × lines × font) —
+       18dp for a 2-line row at 6sp); the fit rules price the per-row sum
+       (six-server live-inventory worst case: 84dp).
+       * 1-row cell: the full layout (worst case 82dp uniform; 84dp for
+         the six-server live inventory with two wrapped rows) is kept
+         whenever the
          allocation holds it — every host that doesn't report an allocation
          (A52 ≈89dp, Pixel ≈116dp, unknown) and every reporting host whose
          1-row cell is ≥82dp; a sub-80dp allocation — the documented
          Samsung S26 Ultra One UI short row (pitch under 80dp, pinned
          conservatively against the 64dp tight case) — renders compact
          (the secondary freshness line dropped; at the pinned 64dp the
-         render is at most 62dp — 3 rows without the freshness line — or
-         60dp with the "+N more" line), and even tighter allocations drop
+         uniform render is at most 62dp — 3 rows without the freshness
+         line — or 60dp with the "+N more" line; wrapped rows price more
+         — the live inventory's compact worst case is 74dp, which at
+         64dp drops to the row floor), and even tighter allocations drop
          grid rows into the "+N more" count until the remainder fits — but
          never past the row floor: at every allocation ≥ the 40dp declared
          floor at least one server row renders (the row-floor render is
@@ -60,8 +70,10 @@
          unreachable last resort below the declared floor.
        * 2-row cell (short-row launchers only): the allocation is
          2×pitch ≥ 2×40dp = 80dp (the 40dp minResize floor), so the fit
-         rules yield the full layout when the allocation is ≥82dp or the
-         72dp compact worst case when it is 80-81dp — it always fits.
+         rules yield the full layout when the allocation holds it (≥82dp
+         uniform; ≥84dp for the live-inventory wrapped worst case) or the
+         compact shape (72dp uniform / 74dp live inventory) — it always
+         fits.
      - min/maxResize (API 31+) agree with the min/max offer ranges;
        launchers below API 31 ignore these attributes and fall back to
        the resizeMode behaviour. -->

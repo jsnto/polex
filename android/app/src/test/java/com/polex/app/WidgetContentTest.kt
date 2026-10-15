@@ -28,6 +28,12 @@ import org.junit.Test
  *    below the widget's declared 40 dp floor, so a sub-floor read is
  *    rejected) and the 89 dp default fallback when the host reports
  *    none;
+ *  - full-name render (no ellipsis): the cell's name font scales from the
+ *    10 sp base to the 6 sp floor against the pinned cell width budget
+ *    (89dp tightest 1×1: 66dp one column, 27dp two columns), names that
+ *    still overrun wrap to the pinned line count, and the wrapped row
+ *    prices its line boxes into the budget arithmetic (the six-server
+ *    live-inventory worst case is 84 dp at the 89 dp default budget);
  *  - server selection: `null` = all servers (the default), an explicit set
  *    = only those, in live-list order;
  *  - stale-selection handling: ids of removed servers are dropped silently
@@ -149,6 +155,177 @@ class WidgetContentTest {
         assertEquals(48, widgetLayoutHeightDp(1, true, false))
         assertEquals(58, widgetLayoutHeightDp(1, true, true))
         assertEquals(26, widgetLayoutHeightDp(0, false, false)) // hero + padding only
+        // The per-row-height form prices wrapped rows the same way
+        // (18 + [10] + Σrows + [10] + 8): the six-server live-inventory
+        // shape (18/12/18 — two wrapped rows) is 84dp full / 74dp compact,
+        // and the row-floor shape with a wrapped first row is 18+18+10+8.
+        assertEquals(84, widgetLayoutHeightDp(listOf(18, 12, 18), true, false))
+        assertEquals(74, widgetLayoutHeightDp(listOf(18, 12, 18), false, false))
+        assertEquals(54, widgetLayoutHeightDp(listOf(18), false, true))
+        // The Int form is the uniform 12dp special case (delegation).
+        assertEquals(
+            widgetLayoutHeightDp(listOf(12, 12, 12), true, true),
+            widgetLayoutHeightDp(3, true, true),
+        )
+    }
+
+    // --- full-name render (no ellipsis) ---
+
+    @Test
+    fun nameWidthBudgetIsPinnedToTheTightestCell() {
+        // 89dp tightest 1×1: content 77dp; 1 column takes it all (minus
+        // the dot + spacer, 11dp), 2 columns a half (floor).
+        assertEquals(66, widgetNameWidthBudgetDp(WIDGET_COLUMNS_1))
+        assertEquals(27, widgetNameWidthBudgetDp(WIDGET_COLUMNS_2))
+        // Out-of-range modes budget the two-column (narrower) side.
+        assertEquals(27, widgetNameWidthBudgetDp(7))
+    }
+
+    @Test
+    fun nameFontScalesWithinThePinnedRangeForTheLiveInventory() {
+        // Live inventory (2026-10-15): i7-13700k(9), ai(2), dev200(6),
+        // dev400(6), homelab420(10), prod480(7) — the longest names are
+        // 10 chars.
+        // 2 columns (27dp budget): short names keep the base, long names
+        // scale toward the 6 sp floor.
+        assertEquals(10, widgetNameFontSp("ai", WIDGET_COLUMNS_2))
+        assertEquals(7, widgetNameFontSp("dev200", WIDGET_COLUMNS_2))
+        assertEquals(7, widgetNameFontSp("dev400", WIDGET_COLUMNS_2))
+        assertEquals(6, widgetNameFontSp("prod480", WIDGET_COLUMNS_2))
+        assertEquals(6, widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_2))
+        assertEquals(6, widgetNameFontSp("homelab420", WIDGET_COLUMNS_2))
+        // 1 column (66dp budget): the whole live inventory fits at the
+        // 10 sp base on a single line.
+        for (name in listOf("i7-13700k", "ai", "dev200", "dev400", "homelab420", "prod480")) {
+            assertEquals("$name font", 10, widgetNameFontSp(name, WIDGET_COLUMNS_1))
+            assertEquals("$name lines", 1, widgetNameLines(name, WIDGET_COLUMNS_1))
+        }
+        // The clamp: nothing below the 6 sp floor, nothing above the base.
+        assertEquals(6, widgetNameFontSp("x".repeat(60), WIDGET_COLUMNS_2))
+        assertEquals(10, widgetNameFontSp("x", WIDGET_COLUMNS_2))
+        assertEquals(10, widgetNameFontSp("", WIDGET_COLUMNS_2))
+    }
+
+    @Test
+    fun longestLiveNamesRenderInFullWithoutEllipsis() {
+        // The longest live names (10 chars — i7-13700k, homelab420):
+        // 1 column: one line at the 10 sp base (55dp ≤ 66dp budget).
+        assertEquals(10, widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_1))
+        assertEquals(1, widgetNameLines("i7-13700k", WIDGET_COLUMNS_1))
+        // 2 columns: they overrun the 27dp budget at the 6 sp floor, so
+        // they WRAP to two lines instead of ellipsizing — and the row
+        // prices both lines (18dp), so no line is clipped.
+        for (name in listOf("i7-13700k", "homelab420")) {
+            assertEquals(6, widgetNameFontSp(name, WIDGET_COLUMNS_2))
+            assertEquals(2, widgetNameLines(name, WIDGET_COLUMNS_2))
+            assertEquals(
+                18,
+                widgetCellRowHeightDp(widgetNameLines(name, WIDGET_COLUMNS_2), widgetNameFontSp(name, WIDGET_COLUMNS_2)),
+            )
+        }
+        // The pinned contract behind "no ellipsis": at the chosen font
+        // the FULL name's width fits the pinned lines (lines × budget)
+        // for every live name, in both modes.
+        for (name in listOf("i7-13700k", "homelab420", "prod480", "dev200", "dev400", "ai")) {
+            for (columns in listOf(WIDGET_COLUMNS_1, WIDGET_COLUMNS_2)) {
+                val width = (60 * name.length * widgetNameFontSp(name, columns) + 99) / 100
+                val capacity = widgetNameLines(name, columns) * widgetNameWidthBudgetDp(columns)
+                assertTrue(
+                    "$name @ $columns columns: the full name must fit its pinned lines",
+                    width <= capacity,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun wrappedRowHeightsArePinned() {
+        // A single line keeps the pinned 12dp row whatever the font (the
+        // shipped row height); a wrapped row prices its line boxes at the
+        // pinned 1.5× factor: ceil(1.5 × lines × font).
+        assertEquals(12, widgetCellRowHeightDp(1, 10))
+        assertEquals(12, widgetCellRowHeightDp(1, 6))
+        assertEquals(18, widgetCellRowHeightDp(2, 6))
+        assertEquals(21, widgetCellRowHeightDp(2, 7))
+        assertEquals(24, widgetCellRowHeightDp(2, 8))
+        assertEquals(30, widgetCellRowHeightDp(2, 10))
+        assertEquals(27, widgetCellRowHeightDp(3, 6))
+    }
+
+    @Test
+    fun pathologicalNamesWrapInsteadOfEllipsizing() {
+        // Far past the live inventory: a 40-char name prices 3 lines at
+        // the 6 sp floor in 1 column (2 lines hold 20 chars: 66dp / 3.6dp
+        // per char), row 27dp; a 16-char name prices 3 lines at the floor
+        // in 2 columns, row 27dp. The budget arithmetic prices those rows
+        // like any other — the name never clips or ellipsizes and the row
+        // layout never breaks.
+        assertEquals(6, widgetNameFontSp("x".repeat(40), WIDGET_COLUMNS_1))
+        assertEquals(3, widgetNameLines("x".repeat(40), WIDGET_COLUMNS_1))
+        assertEquals(27, widgetCellRowHeightDp(3, 6))
+        assertEquals(6, widgetNameFontSp("x".repeat(16), WIDGET_COLUMNS_2))
+        assertEquals(3, widgetNameLines("x".repeat(16), WIDGET_COLUMNS_2))
+        // End to end: a single 27dp wrapped row keeps the FULL layout at
+        // the 64dp tight case (63dp ≤ 64dp) and holds the row floor at
+        // the 40dp floor (one row renders, priced at 63dp).
+        val wrapped = listOf(27)
+        val short = widgetVerticalLayout(wrapped, false, WIDGET_HOST_BUDGET_SHORT_DP)
+        assertEquals(1, short.gridRows)
+        assertTrue(short.showFreshness)
+        assertEquals(63, short.allocatedHeightDp)
+        val floor = widgetVerticalLayout(wrapped, false, WIDGET_CELL_FLOOR_DP)
+        assertEquals(1, floor.gridRows)
+        assertFalse(floor.showFreshness)
+        assertEquals(63, floor.allocatedHeightDp)
+    }
+
+    @Test
+    fun sixServerLiveInventoryGeometry() {
+        // The live six (2026-10-15): i7-13700k, ai, dev200, dev400,
+        // homelab420, prod480. 2 columns: rows (i7-13700k|ai),
+        // (dev200|dev400), (homelab420|prod480) → heights 18/12/18:
+        // the 9-10 char names wrap at the 6 sp floor (2 lines → 18dp
+        // rows); prod480 fits one line at 6 sp (26dp ≤ 27dp).
+        val live = listOf(
+            srv(1, name = "i7-13700k"), srv(2, name = "ai"), srv(3, name = "dev200"),
+            srv(5, name = "dev400"), srv(10, name = "homelab420"), srv(11, name = "prod480"),
+        )
+        val columns = WIDGET_COLUMNS_2
+        val rows = widgetGridRows(live, columns)
+        assertEquals(3, rows.size)
+        assertEquals(listOf(18, 12, 18), widgetRowHeightsDp(live, columns))
+        assertEquals(0, widgetOverflow(live, columns)) // all six fit the 6-cell budget
+        // 89dp-class 1×1: the full layout (84dp — the two wrapped rows
+        // price 18dp each instead of 12dp) fits: all six listed, no
+        // overflow line, freshness kept.
+        val layout = widgetVerticalLayout(widgetRowHeightsDp(live, columns), widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        assertEquals(3, layout.gridRows)
+        assertTrue(layout.showFreshness)
+        assertEquals(84, layout.allocatedHeightDp)
+        assertEquals(0, live.size - rows.take(layout.gridRows).sumOf { it.size })
+        // Every stretched (2-row) allocation (80..158dp): all six still
+        // list as three rows with no overflow line — the 80dp edge keeps
+        // the 74dp compact (freshness drops, the rows stay).
+        for (pitch in 40..79) {
+            val budget = 2 * pitch
+            val l = widgetVerticalLayout(widgetRowHeightsDp(live, columns), false, budget)
+            assertEquals("$budget dp: all six list as 3 rows", 3, l.gridRows)
+            assertEquals(0, live.size - rows.take(l.gridRows).sumOf { it.size })
+        }
+        // 1×1 at the 40dp floor: the row floor holds — one row renders
+        // (the wrapped 18dp first row), "+4 more" carries the remainder.
+        val floor = widgetVerticalLayout(widgetRowHeightsDp(live, columns), false, WIDGET_CELL_FLOOR_DP)
+        assertEquals(1, floor.gridRows)
+        assertEquals(4, live.size - rows.take(floor.gridRows).sumOf { it.size })
+        // 1 column, 1×1 (89dp-class): the live names all fit one line at
+        // the 10 sp base (12dp rows) — three listed + a "+3 more".
+        val oneColHeights = widgetRowHeightsDp(live, WIDGET_COLUMNS_1)
+        assertEquals(listOf(12, 12, 12), oneColHeights)
+        assertEquals(3, widgetOverflow(live, WIDGET_COLUMNS_1))
+        val oneCol = widgetVerticalLayout(oneColHeights, true, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        assertEquals(3, oneCol.gridRows)
+        assertTrue(oneCol.showFreshness)
+        assertEquals(widgetLayoutHeightDp(3, true, true), oneCol.allocatedHeightDp) // 82dp
     }
 
     @Test

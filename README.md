@@ -294,7 +294,11 @@ there): a colored
 `N/M UP` hero with the data-freshness
 time under it ("updated 14:32"), then a grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
-doesn't fit). The widget's declared minimum width is 40dp — the AOSP-safe
+doesn't fit). Server names are shown in full — no ellipsis truncation:
+each cell's font scales from 10sp toward 6sp so the name fits the cell
+(pinned to the tightest ≈89dp 1×1 width), and a name that still overruns
+wraps to a second line, growing its row (the row prices its line boxes
+and the fit rules price the sum). The widget's declared minimum width is 40dp — the AOSP-safe
 floor that lets launchers with a ≥40dp picker column pitch offer the
 1-column (1×1) tile (the Pixel 7 Pro's picker pitch is in [40, 80) dp);
 a placed widget is always at least one home-grid column wide (≈94 dp on

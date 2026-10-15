@@ -75,6 +75,110 @@ fun widgetOverflow(items: List<SrvStatus>, columns: Int): Int =
     (items.size - widgetMaxCells(normalizeWidgetColumns(columns))).coerceAtLeast(0)
 
 // ---------------------------------------------------------------------------
+// Full-name render (no ellipsis) — the grid cell shows the server name in
+// FULL: the font scales down from the 10 sp base to the 6 sp floor so the
+// name fits the cell's width budget, and a name that still overruns at
+// the floor wraps to more lines, growing its row (the row prices the line
+// boxes, and the short-cell budget below prices the sum). The width budget
+// is pinned to the tightest 1×1 cell width (A52 ≈89 dp — the same pin
+// class as the vertical [WIDGET_HOST_BUDGET_DEFAULT_DP]): a span-agnostic
+// fit, exactly like the vertical budget — the name that fits the 89 dp
+// cell fits every wider placement (2×1, stretched cells). The model is
+// pinned pure arithmetic (testable on the JVM): average character advance
+// 0.6 em (conservative for mixed-case sans-serif; 1sp ≈ 1dp at the
+// widget's type scale — the same convention as the row-height constants),
+// line box 1.5× font.
+// ---------------------------------------------------------------------------
+
+/** Pinned tightest 1×1 cell WIDTH, dp (A52 ≈89 dp — same pin class as the vertical default budget). */
+const val WIDGET_CELL_1X1_WIDTH_DP = 89
+
+/** Widget root horizontal padding, dp (6dp left + 6dp right). */
+const val WIDGET_H_PADDING_DP = 12
+
+/** Dot glyph ("●", 8 sp) allocated width, dp. */
+const val WIDGET_CELL_DOT_WIDTH_DP = 8
+
+/** Dot-to-name spacer, dp. */
+const val WIDGET_CELL_SPACER_DP = 3
+
+/** Baseline name font, sp (the historical 10 sp grid-cell type). */
+const val WIDGET_NAME_BASE_FONT_SP = 10
+
+/** Name font scale floor, sp — a name that doesn't fit at the floor wraps instead of shrinking further. */
+const val WIDGET_NAME_MIN_FONT_SP = 6
+
+/**
+ * The width budget (dp) a server name has in one grid cell — pinned to
+ * the tightest 1×1 cell ([WIDGET_CELL_1X1_WIDTH_DP]): content width
+ * 89 - 12 (horizontal padding); 1 column takes the whole content width,
+ * 2 columns a half (floor); minus the dot + spacer (11dp). 1 column:
+ * 66dp; 2 columns: 27dp.
+ */
+fun widgetNameWidthBudgetDp(columns: Int): Int {
+    val content = WIDGET_CELL_1X1_WIDTH_DP - WIDGET_H_PADDING_DP
+    val half = if (normalizeWidgetColumns(columns) == WIDGET_COLUMNS_1) content else content / 2
+    return half - WIDGET_CELL_DOT_WIDTH_DP - WIDGET_CELL_SPACER_DP
+}
+
+/** Pinned width model: `ceil(0.6 × len × font)` dp (average 0.6em advance). */
+private fun nameWidthDp(name: String, fontSp: Int): Int =
+    (60 * name.length * fontSp + 99) / 100
+
+/**
+ * The name font (sp) for a cell: the largest font at which the FULL name
+ * fits the width budget, clamped to [WIDGET_NAME_MIN_FONT_SP,
+ * [WIDGET_NAME_BASE_FONT_SP]] — short names stay at the 10 sp base (the
+ * historical render), long names scale toward the 6 sp floor, where they
+ * wrap instead of shrinking further ([widgetNameLines]).
+ */
+fun widgetNameFontSp(name: String, columns: Int): Int {
+    if (name.isEmpty()) return WIDGET_NAME_BASE_FONT_SP
+    val fit = (100 * widgetNameWidthBudgetDp(columns)) / (60 * name.length)
+    return fit.coerceIn(WIDGET_NAME_MIN_FONT_SP, WIDGET_NAME_BASE_FONT_SP)
+}
+
+/**
+ * The lines the FULL name renders in its cell at its [widgetNameFontSp]
+ * — `ceil(nameWidth / budget)`: 1 for every name that fits (including at
+ * the scaled fonts), ≥2 only when the name overruns the budget at the 6
+ * sp floor. The row prices exactly these lines
+ * ([widgetCellRowHeightDp]), so no line of the name is ever clipped or
+ * ellipsized.
+ */
+fun widgetNameLines(name: String, columns: Int): Int {
+    val budget = widgetNameWidthBudgetDp(columns)
+    val width = nameWidthDp(name, widgetNameFontSp(name, columns))
+    return if (width == 0) 1 else (width + budget - 1) / budget
+}
+
+/**
+ * The allocated row height (dp) for a cell needing [lines] name lines at
+ * [fontSp]: a single-line row keeps the pinned 12dp
+ * ([WIDGET_GRID_ROW_HEIGHT_DP] — the shipped row height; the 10 sp glyph
+ * span fits with the row centered); a wrapped row prices its line boxes
+ * at the pinned 1.5× factor (Glance type's ≈1.4-1.5× line box) so every
+ * line stays visible: `ceil(1.5 × lines × font)`.
+ */
+fun widgetCellRowHeightDp(lines: Int, fontSp: Int): Int =
+    if (lines <= 1) WIDGET_GRID_ROW_HEIGHT_DP else (3 * lines * fontSp + 1) / 2
+
+/**
+ * The pinned per-row heights (dp) of the grid rows for [items] in
+ * [columns] mode — per row, the tallest cell (a two-column row is two
+ * cells with possibly different fonts/wrap): the input to the short-cell
+ * budget arithmetic, replacing the uniform 12dp rows for renders with
+ * wrapped names.
+ */
+fun widgetRowHeightsDp(items: List<SrvStatus>, columns: Int): List<Int> =
+    widgetGridRows(items, columns).map { row ->
+        row.maxOf { s ->
+            widgetCellRowHeightDp(widgetNameLines(s.name, columns), widgetNameFontSp(s.name, columns))
+        }
+    }
+
+
+// ---------------------------------------------------------------------------
 // Short-cell vertical fit (the 1-row placement every launcher can now make
 // possible with the 40dp declared height floor — see polex_widget_info.xml).
 //
@@ -118,26 +222,36 @@ const val WIDGET_VERTICAL_PADDING_DP = 8
 const val WIDGET_CELL_FLOOR_DP = 40
 
 /**
- * Allocated height (dp) of a render with [gridRows] server-grid rows, the
- * optional secondary [freshness] line, and the optional [overflow] line —
- * the pinned arithmetic the budgets below are checked against:
+ * Allocated height (dp) of a render with the given per-row grid heights,
+ * the optional secondary [freshness] line, and the optional [overflow]
+ * line — the pinned arithmetic the budgets below are checked against:
  *
- *   18 (hero) + [10 (freshness)] + 12 × rows + [10 (overflow)] + 8 (padding)
+ *   18 (hero) + [10 (freshness)] + Σ rowHeights + [10 (overflow)] + 8 (padding)
  *
- * The worst case (3 rows, freshness, overflow) is 82 dp — the same figure
- * the 1×1 budgets above are pinned to against the 89 dp default budget.
+ * A single-line name row is the pinned 12dp
+ * ([WIDGET_GRID_ROW_HEIGHT_DP]); a wrapped name row is its line-box price
+ * ([widgetCellRowHeightDp]). The uniform 12dp special case is the
+ * `12 × rows` form (the Int overload): the worst case (3 rows, freshness,
+ * overflow) is 82 dp — the figure the 1×1 budgets are pinned to against
+ * the 89 dp default budget — while a wrapped row prices more (the
+ * six-server live-inventory worst case is 84 dp: 3 rows, two wrapped at
+ * 18dp, freshness, no overflow).
  *
  * The row floor (see [widgetVerticalLayout]): at the 40 dp declared cell
- * floor the non-optional parts — 18 + 12 × 1 + 8 = 38 dp — always fit, so
- * one server row renders at every legal allocation; the guaranteed
- * "+N more" line a row drop makes render prices the 48 dp row-floor shape.
+ * floor the non-optional parts — 18 + one row + 8 — always fit, so one
+ * server row renders at every legal allocation; the guaranteed "+N more"
+ * line a row drop makes render prices the 48 dp uniform row-floor shape.
  */
-fun widgetLayoutHeightDp(gridRows: Int, freshness: Boolean, overflow: Boolean): Int =
+fun widgetLayoutHeightDp(rowHeights: List<Int>, freshness: Boolean, overflow: Boolean): Int =
     WIDGET_HERO_HEIGHT_DP +
         (if (freshness) WIDGET_FRESHNESS_HEIGHT_DP else 0) +
-        gridRows * WIDGET_GRID_ROW_HEIGHT_DP +
+        rowHeights.sum() +
         (if (overflow) WIDGET_OVERFLOW_HEIGHT_DP else 0) +
         WIDGET_VERTICAL_PADDING_DP
+
+/** The uniform 12dp special case: `18 + [10] + 12 × gridRows + [10] + 8`. */
+fun widgetLayoutHeightDp(gridRows: Int, freshness: Boolean, overflow: Boolean): Int =
+    widgetLayoutHeightDp(List(gridRows) { WIDGET_GRID_ROW_HEIGHT_DP }, freshness, overflow)
 
 /**
  * The documented TIGHT short-row case, in dp — 64 dp. The Samsung S26
@@ -152,7 +266,11 @@ fun widgetLayoutHeightDp(gridRows: Int, freshness: Boolean, overflow: Boolean): 
  * or 60 dp (2 rows + the "\+N more" line, no freshness line), while the
  * full worst case (82 dp) and the 3-row compact (72 dp) exceed the pin —
  * which is exactly why the fit rules drop the secondary line first and
- * then grid rows at that budget. This constant is the PIN (the tests and
+ * then grid rows at that budget. Wrapped (multi-line) name rows price
+ * more than the uniform 12 dp, and the fit rules handle that generically
+ * over the per-row heights (the six-server live inventory's compact worst
+ * case is 74 dp, so at the 64 dp pin it drops to the row floor). This
+ * constant is the PIN (the tests and
  * the metadata comment are checked against it); the live budget is the
  * host-reported allocation via [widgetBudgetDp] — a host that allocates
  * more than 64 dp (up to the 82 dp full-layout worst case) simply keeps
@@ -210,26 +328,29 @@ fun widgetBudgetDp(allocatedHeightDp: Int?): Int =
  *     render always lands here) at least one server row renders; the
  *     "+N more" line may carry the remainder beyond what fits, never the
  *     entire list. The row-floor render prices the pinned arithmetic's
- *     non-optional parts — 18 + 12 × 1 + 8 = 38 dp (hero + one row +
+ *     non-optional parts — 18 + 12 + 8 = 38 dp (hero + one uniform row +
  *     padding), which always fits the 40 dp floor — plus the guaranteed
  *     "+N more" line a row drop makes render (48 dp), so a 40..47 dp
  *     allocation is exceeded by at most 8 dp (the line's height) — the
- *     pinned "one row at the 40 dp floor". The hero-only render (0 rows)
- *     remains only as the unreachable last resort BELOW the declared
- *     floor, where the pre-guard arithmetic is kept as-is.
+ *     pinned "one row at the 40 dp floor"; a wrapped first row prices its
+ *     line boxes instead of the 12dp, so the row-floor render there is
+ *     taller by the wrap price (only the bottom-anchored overflow line
+ *     clips at that allocation, as with the uniform pin). The hero-only
+ *     render (0 rows) remains only as the unreachable last resort BELOW
+ *     the declared floor, where the pre-guard arithmetic is kept as-is.
  *
- * [desiredGridRows] is the row count after the per-mode [widgetMaxCells]
- * budget (at most 3); [overflow] is whether the "+N more" line is present
- * at all (more servers than the budget shows). The returned layout is ≤
- * [budgetDp] whenever the budget holds at least 48 dp (hero + one row +
- * the overflow line + padding — the row-floor render, since the line
- * always renders once rows drop); at a 40..47 dp allocation the row floor
- * renders the 48 dp shape (≤8 dp past the allocation); below the 40 dp
- * declared floor (unreachable after [widgetBudgetDp]'s guard) the
- * hero-only render is the last resort, ≤ 36 dp.
+ * [rowHeights] is the pinned per-row heights after the per-mode
+ * [widgetMaxCells] budget (at most 3 rows — [widgetRowHeightsDp]);
+ * [overflow] is whether the "+N more" line is present at all (more
+ * servers than the budget shows). The returned layout is ≤ [budgetDp]
+ * whenever the budget holds at least the row-floor render (48 dp for
+ * uniform rows); at a 40..47 dp allocation the row floor renders the
+ * row-floor shape (≤8 dp past the allocation for uniform rows); below
+ * the 40 dp declared floor (unreachable after [widgetBudgetDp]'s guard)
+ * the hero-only render is the last resort, ≤ 36 dp.
  */
 data class WidgetVerticalLayout(
-    /** Server-grid rows to render (≤ [desiredGridRows]). */
+    /** Server-grid rows to render (≤ the desired row count). */
     val gridRows: Int,
     /** Whether the secondary data-freshness line is rendered. */
     val showFreshness: Boolean,
@@ -238,18 +359,26 @@ data class WidgetVerticalLayout(
 )
 
 /** The decision for [widgetVerticalLayout] — see its KDoc for the rules. */
-fun widgetVerticalLayout(desiredGridRows: Int, overflow: Boolean, budgetDp: Int): WidgetVerticalLayout {
-    val full = widgetLayoutHeightDp(desiredGridRows, freshness = true, overflow = overflow)
-    if (full <= budgetDp) return WidgetVerticalLayout(desiredGridRows, true, full)
-    val compact = widgetLayoutHeightDp(desiredGridRows, freshness = false, overflow = overflow)
-    if (compact <= budgetDp) return WidgetVerticalLayout(desiredGridRows, false, compact)
+fun widgetVerticalLayout(rowHeights: List<Int>, overflow: Boolean, budgetDp: Int): WidgetVerticalLayout {
+    val full = widgetLayoutHeightDp(rowHeights, freshness = true, overflow = overflow)
+    if (full <= budgetDp) return WidgetVerticalLayout(rowHeights.size, true, full)
+    val compact = widgetLayoutHeightDp(rowHeights, freshness = false, overflow = overflow)
+    if (compact <= budgetDp) return WidgetVerticalLayout(rowHeights.size, false, compact)
     // Row floor: at every legal budget (≥ the 40 dp declared cell floor,
     // [widgetBudgetDp] rejects sub-floor reads) at least one server row
     // renders — the "+N more" line carries the remainder, never the
     // entire list. Below the floor (unreachable on a live render) the
     // hero-only render remains the last resort, as before.
-    val floorRows = if (desiredGridRows > 0 && budgetDp >= WIDGET_CELL_FLOOR_DP) 1 else 0
-    var rows = desiredGridRows
-    while (rows > floorRows && widgetLayoutHeightDp(rows, freshness = false, overflow = true) > budgetDp) rows--
-    return WidgetVerticalLayout(rows, false, widgetLayoutHeightDp(rows, freshness = false, overflow = true))
+    val floorRows = if (rowHeights.isNotEmpty() && budgetDp >= WIDGET_CELL_FLOOR_DP) 1 else 0
+    var rows = rowHeights.size
+    while (rows > floorRows && widgetLayoutHeightDp(rowHeights.take(rows), freshness = false, overflow = true) > budgetDp) rows--
+    return WidgetVerticalLayout(rows, false, widgetLayoutHeightDp(rowHeights.take(rows), freshness = false, overflow = true))
 }
+
+/**
+ * The uniform-row form of [widgetVerticalLayout] — every grid row at the
+ * pinned [WIDGET_GRID_ROW_HEIGHT_DP] (12dp), the pre-wrap pinned
+ * arithmetic.
+ */
+fun widgetVerticalLayout(gridRows: Int, overflow: Boolean, budgetDp: Int): WidgetVerticalLayout =
+    widgetVerticalLayout(List(gridRows) { WIDGET_GRID_ROW_HEIGHT_DP }, overflow, budgetDp)

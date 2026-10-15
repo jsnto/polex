@@ -68,15 +68,21 @@ private val DotRed = Color(0xFFF44336)
  * The two-column grid reflows across the wider 2×1 cell with no layout
  * branching: each grid row is two equal `defaultWeight` halves (instead of
  * the old left/right anchors), so the same halves are tight at 1×1 and
- * widen with the 2×1 span. The name budget is always [CELL_NAME_MAX]
- * (4 chars) at both sizes: the launcher instance options carry the cell
- * POSITION (`cellX`, the 0-based column of the widget's top-left corner),
- * not its span, so a span-based budget can't be read from the stable
- * options API — the narrow budget is the only one guaranteed to fit every
- * placement. A placed widget is always at least one home-grid column wide
- * (≈94 dp on the Pixel 7 Pro, ≈89 dp on the A52 — the 40dp declared
- * minimum only affects the launcher PICKER's tile size, not the placed
- * widget), so the live type sizes fit with budget to spare.
+ * widen with the 2×1 span. Server names are shown in FULL — no ellipsis
+ * truncation: each cell's font scales from the 10 sp base toward the 6 sp
+ * floor so the name fits the cell's width budget (pinned to the tightest
+ * 1×1 cell width, ≈89 dp A52 class — the launcher instance options carry
+ * the cell POSITION (`cellX`, the 0-based column of the widget's top-left
+ * corner), not its span, so a span-based budget can't be read from the
+ * stable options API — the narrow budget is the only one guaranteed to fit
+ * every placement), and a name that still overruns at the floor wraps to
+ * more lines, growing its row: the row prices its line boxes
+ * (`ceil(1.5 × lines × font)`, pinned in WidgetContent.kt) and the budget
+ * arithmetic prices the per-row sum. A placed widget is always at least
+ * one home-grid column wide (≈94 dp on the Pixel 7 Pro, ≈89 dp on the
+ * A52 — the 40dp declared minimum only affects the launcher PICKER's tile
+ * size, not the placed widget), so the live type sizes fit with budget to
+ * spare.
  *
  * Tight rows — how the padding between rows is fixed:
  *  - Glance 1.1.0's `Text`/`TextStyle` exposes **no `lineHeight`** and the
@@ -92,10 +98,14 @@ private val DotRed = Color(0xFFF44336)
  *    constrained vertically, so the Column advances by the tight height
  *    instead of the full line box (glyphs stay clear: the line-box padding
  *    that would collide overflows instead of pushing the next row down).
- *    Worst-case content is 82 dp (3 rows + freshness + overflow) in the
+ *    A single-line name row stays the pinned 12dp; a wrapped (multi-line)
+ *    name row prices its line boxes (`ceil(1.5 × lines × font)` — the
+ *    per-row heights from [widgetRowHeightsDp]), so a full name never
+ *    clips or breaks the row. Worst-case content is 84 dp (the six-server
+ *    live inventory: 3 rows, two wrapped at 18dp, + freshness) in the
  *    ≈89–116 dp 1×1 cells on the default-budget hosts (A52 ≈89 dp, Pixel 7
  *    Pro ≈116 dp — measured from a placed 1×1 widget's bounds) — the
- *    historical render.
+ *    historical uniform-row render was 82 dp.
  *
  * Short cells — the compact render when the host's ALLOCATION is too short
  * for the full layout (e.g. the Samsung S26 Ultra's One UI launcher, whose
@@ -130,8 +140,9 @@ private val DotRed = Color(0xFFF44336)
  * stable options API (only the cell position), so the layout is pinned to
  * the tightest 1-row cell and every offered size renders the same content
  * top-aligned (a 2-row allocation — short-row launchers — is 2×pitch ≥
- * 2×40dp = 80 dp: the fit rules keep the full layout when it fits (≥82 dp)
- * or drop to the 72 dp compact worst case (≤80 dp), so it always fits).
+ * 2×40dp = 80 dp: the fit rules keep the full layout when it fits, or
+ * drop the secondary line to the compact shape (74 dp for the six-server
+ * live inventory, 72 dp uniform worst case — ≤80 dp), so it always fits).
  *
  *
  * Glance notes:
@@ -148,9 +159,6 @@ private val DotRed = Color(0xFFF44336)
 class ServerWidget : GlanceAppWidget() {
 
     companion object {
-        /** Visible grid cell name chars before the "…" (10sp Medium, 1×1 half-cell width). */
-        private const val CELL_NAME_MAX = 4
-
         // Tight row heights (see class KDoc) — the dp constants from
         // WidgetContent.kt (the single source of truth shared with the
         // short-cell budget checks), sized to the 8/10/16 sp type: ≈1.2×
@@ -180,13 +188,17 @@ class ServerWidget : GlanceAppWidget() {
         val cacheTime = Prefs.cacheTime(context)
         val rows = widgetGridRows(items, columns)
         val hidden = widgetOverflow(items, columns)
+        // Per-row heights (dp): 12dp per single-line name; a wrapped name
+        // row (the full-name render — no ellipsis) prices its line boxes.
+        val rowHeights = widgetRowHeightsDp(items, columns)
 
         // Short-cell fit (see the class KDoc and WidgetContent.kt): the
         // host's ALLOCATED height decides whether this render keeps the
         // full layout, drops the secondary freshness line, or drops grid
         // rows into the "+N more" count.
-        val layout = widgetVerticalLayout(rows.size, hidden > 0, hostCellBudgetDp(context, id))
+        val layout = widgetVerticalLayout(rowHeights, hidden > 0, hostCellBudgetDp(context, id))
         val shownRows = rows.take(layout.gridRows)
+        val shownRowHeights = rowHeights.take(layout.gridRows)
         val shownHidden = items.size - shownRows.sumOf { it.size }
 
         // Colored by the up/down verdict (green all-up, red otherwise).
@@ -254,22 +266,22 @@ class ServerWidget : GlanceAppWidget() {
                     // fill-width Column per column gives the even
                     // two-column split that reflows across the 2×1 span.
                     // One column: one row per server, full width.
-                    shownRows.forEach { rowItems ->
+                    shownRows.forEachIndexed { index, rowItems ->
                         Row(
                             modifier = GlanceModifier
                                 .fillMaxWidth()
-                                .height(cellHeight),
+                                .height(shownRowHeights[index].dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (columns == WIDGET_COLUMNS_1) {
-                                cell(rowItems.first())
+                                cell(rowItems.first(), columns)
                             } else {
                                 Column(GlanceModifier.defaultWeight()) {
-                                    cell(rowItems.first())
+                                    cell(rowItems.first(), columns)
                                 }
                                 if (rowItems.size > 1) {
                                     Column(GlanceModifier.defaultWeight()) {
-                                        cell(rowItems.last())
+                                        cell(rowItems.last(), columns)
                                     }
                                 }
                             }
@@ -327,9 +339,18 @@ class ServerWidget : GlanceAppWidget() {
         }
     }
 
-    /** One grid cell: colored dot + truncated name; offline styled red (no `off` label at 1×1). */
+    /**
+     * One grid cell: colored dot + the server name in FULL (no ellipsis):
+     * the font scales from the 10 sp base toward the 6 sp floor so the
+     * name fits the pinned cell width budget, and a name that overruns at
+     * the floor wraps to its pinned line count (`maxLines`) — the row
+     * prices the line boxes (see WidgetContent.kt). Offline styled red
+     * (no `off` label at 1×1).
+     */
     @Composable
-    private fun RowScope.cell(s: SrvStatus) {
+    private fun RowScope.cell(s: SrvStatus, columns: Int) {
+        val fontSp = widgetNameFontSp(s.name, columns)
+        val lines = widgetNameLines(s.name, columns)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "●",
@@ -340,19 +361,16 @@ class ServerWidget : GlanceAppWidget() {
             )
             Spacer(GlanceModifier.width(3.dp))
             Text(
-                text = cellName(s.name, CELL_NAME_MAX),
+                text = s.name,
                 style = TextStyle(
                     color = ColorProvider(if (s.online) TextPrimary else DotRed),
                     fontWeight = FontWeight.Medium,
-                    fontSize = 10.sp,
+                    fontSize = fontSp.sp,
                 ),
-                maxLines = 1,
+                maxLines = lines,
             )
         }
     }
-
-    private fun cellName(name: String, max: Int): String =
-        if (name.length <= max) name else name.take(max) + "…"
 
     private fun timeOfDay(epochMillis: Long): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochMillis))
