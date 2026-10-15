@@ -25,12 +25,14 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -61,7 +65,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 /** Which sub-screen the settings menu shows. */
-private enum class SettingsPane { Menu, Backend, Servers }
+private enum class SettingsPane { Menu, Backend, Servers, Widget }
 
 /**
  * Minimal settings menu: Backend, Servers, Log out.
@@ -95,6 +99,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
         SettingsPane.Menu -> MenuPane(
             onBackend = { pane = SettingsPane.Backend },
             onServers = { pane = SettingsPane.Servers },
+            onWidget = { pane = SettingsPane.Widget },
             onLogout = onLogout,
             onBack = onBack,
         )
@@ -104,6 +109,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
             onAdd = { editTarget = SrvEntry(0, "", "", "", 22, "tcp") },
             onEdit = { _, entry -> editTarget = entry },
         )
+        SettingsPane.Widget -> if (!editing) WidgetScreen(onBack = { pane = SettingsPane.Menu })
     }
     if (editing) {
         val target = editTarget!!
@@ -124,6 +130,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
 private fun MenuPane(
     onBackend: () -> Unit,
     onServers: () -> Unit,
+    onWidget: () -> Unit,
     onLogout: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -156,6 +163,7 @@ private fun MenuPane(
         ) {
             MenuRow(icon = Icons.Default.Settings, title = "Backend", subtitle = Prefs.base(context), onClick = onBackend)
             MenuRow(icon = Icons.Filled.Dns, title = "Servers", subtitle = "Add, edit or remove servers", onClick = onServers)
+            MenuRow(icon = Icons.Filled.GridView, title = "Widget", subtitle = "What the home-screen widget shows", onClick = onWidget)
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     VersionRow("App version", appVersion, outdated = (outdated == "app"))
@@ -297,6 +305,172 @@ fun BackendScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * Widget display settings: the grid's column mode (1 or 2, default 2 —
+ * the original look) and which servers the widget shows (a multi-select
+ * over the live server list, default all). A change persists to [Prefs]
+ * and re-renders the widget immediately: a fresh status fetch when the
+ * backend answers (so the new selection renders on fresh data, like the
+ * Backend URL save does), then a render from whatever cache is on disk.
+ * Stale selections (a server removed elsewhere) are dropped silently by
+ * the widget at render time; this pane just lists the live servers.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WidgetScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var twoColumn by remember { mutableStateOf(Prefs.widgetColumns(context) == WIDGET_COLUMNS_2) }
+    // null = unset = "show all" (the default).
+    var selectedIds by remember { mutableStateOf(Prefs.widgetSelectedServerIds(context)) }
+    var servers by remember { mutableStateOf<List<SrvEntry>?>(null) }
+    var message by remember { mutableStateOf("") }
+
+    fun applyAndRefresh() {
+        scope.launch {
+            val r = Api.safe { Api.get("${Api.base(context)}/api/status") }
+            if (r.code == 200) Prefs.setCache(context, r.body)
+            ServerWidget.refreshAll(context)
+        }
+    }
+
+    fun loadServers() {
+        scope.launch {
+            val result = Api.safe { Api.get("${Api.base(context)}/api/servers") }
+            message = if (result.code == 200) {
+                servers = parseServerArray(result.body)
+                ""
+            } else {
+                "Cannot load servers (${friendlyError(result.body)})"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { loadServers() }
+
+    // Check state: the stored selection, or every live server while unset
+    // (the "show all" default).
+    fun isChecked(id: Int): Boolean =
+        (selectedIds ?: servers?.map { it.id }?.toSet() ?: emptySet()).contains(id)
+
+    fun toggleServer(id: Int) {
+        val current = (selectedIds ?: servers?.map { it.id }?.toSet() ?: emptySet()).toMutableSet()
+        if (!current.remove(id)) current.add(id)
+        selectedIds = current.toSet()
+        Prefs.setWidgetSelectedServerIds(context, current)
+        applyAndRefresh()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Widget") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { pad ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(pad)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // ---- layout mode ----
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Two-column grid", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "How the server cells are laid out: two columns show dot + name pairs per row; one column shows one row per server.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = twoColumn,
+                            onCheckedChange = {
+                                twoColumn = it
+                                Prefs.setWidgetColumns(context, if (it) WIDGET_COLUMNS_2 else WIDGET_COLUMNS_1)
+                                applyAndRefresh()
+                            },
+                            modifier = Modifier.semantics { contentDescription = "Two-column grid" },
+                        )
+                    }
+                }
+            }
+            // ---- which servers to show ----
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Servers to show", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "The servers the widget lists (default: all).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = {
+                            val all = servers?.map { it.id }?.toSet() ?: emptySet()
+                            selectedIds = all
+                            Prefs.setWidgetSelectedServerIds(context, all)
+                            applyAndRefresh()
+                        }) { Text("All") }
+                        TextButton(onClick = {
+                            selectedIds = emptySet()
+                            Prefs.setWidgetSelectedServerIds(context, emptySet())
+                            applyAndRefresh()
+                        }) { Text("None") }
+                    }
+                    when {
+                        servers == null && message.isEmpty() -> Text(
+                            "Loading servers…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        message.isNotEmpty() -> Text(
+                            message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        servers!!.isEmpty() -> Text(
+                            "No servers configured — the widget will show no servers.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        else -> servers!!.forEach { s ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = isChecked(s.id),
+                                    onCheckedChange = { toggleServer(s.id) },
+                                    modifier = Modifier.semantics { contentDescription = "Show ${s.name} in widget" },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(s.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        s.ip,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -4,16 +4,28 @@
      a two-column dot + name grid (offline cell styled red). The two grid
      cells are equal weighted halves, matching the Glance content layout
      (ServerWidget) so the preview reflows the same way when stretched
-     across the wider 2x1 cell. -->
+     across the wider 2x1 cell.
+
+     Type sizes run slightly SMALLER than the live widget (14/9/7/7/9 sp
+     here vs 16/10/8/8/10 sp there, 4dp vs 6/4dp padding): the launcher's
+     widget picker renders this layout at its own column pitch, which on
+     the Pixel 7 Pro is in the [40, 80) dp range (the home grid's ≈94 dp
+     columns are only where the LIVE widget is placed, so the live sizes
+     fit there with budget to spare). At a 40dp-wide picker tile the
+     14sp hero still fits; the freshness line only clips at the very
+     narrowest pitches. The RemoteViews-safe element constraint still
+     applies: only LinearLayout/TextView (a plain android.view.View is
+     refused by the launcher's preview renderer, "Class not allowed to be
+     inflated"). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="#111827"
-    android:paddingStart="6dp"
-    android:paddingEnd="6dp"
-    android:paddingTop="4dp"
-    android:paddingBottom="4dp">
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp">
 
     <!-- hero: 1/2 UP (red — not all up) -->
     <LinearLayout
@@ -28,16 +40,16 @@
             android:text="1/2"
             android:textColor="#F44336"
             android:textStyle="bold"
-            android:textSize="16sp" />
+            android:textSize="14sp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="3dp"
+            android:layout_marginStart="2dp"
             android:text="UP"
             android:textColor="#F44336"
             android:textStyle="bold"
-            android:textSize="10sp" />
+            android:textSize="9sp" />
     </LinearLayout>
 
     <!-- freshness line -->
@@ -46,7 +58,7 @@
         android:layout_height="wrap_content"
         android:text="updated 14:32"
         android:textColor="#9CA3AF"
-        android:textSize="8sp" />
+        android:textSize="7sp" />
 
     <!-- grid row: two equal weighted halves (RemoteViews-safe elements
          only — a plain android.view.View is refused by the launcher's
@@ -69,15 +81,15 @@
                 android:layout_height="wrap_content"
                 android:text="●"
                 android:textColor="#4CAF50"
-                android:textSize="8sp" />
+                android:textSize="7sp" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
+                android:layout_marginStart="2dp"
                 android:text="NAS"
                 android:textColor="#F9FAFB"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:maxLines="1" />
         </LinearLayout>
 
@@ -93,15 +105,15 @@
                 android:layout_height="wrap_content"
                 android:text="●"
                 android:textColor="#F44336"
-                android:textSize="8sp" />
+                android:textSize="7sp" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="3dp"
+                android:layout_marginStart="2dp"
                 android:text="Work…"
                 android:textColor="#F44336"
-                android:textSize="10sp"
+                android:textSize="9sp"
                 android:maxLines="1" />
         </LinearLayout>
     </LinearLayout>

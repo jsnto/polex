@@ -43,18 +43,32 @@ private val DotRed = Color(0xFFF44336)
 /**
  * Home screen widget, offered at 1×1 and 2×1 (2 wide, 1 tall — see
  * `res/xml/polex_widget_info.xml`): a colored `N/M UP` hero with the
- * data-freshness line under it, then a two-column grid of server cells
- * (dot + name; offline = red dot + red name — the `off` label drops at 1×1
- * width). Data comes from the status cache kept fresh by [StatusWorker].
+ * data-freshness line under it, then a grid of server cells (dot + name;
+ * offline = red dot + red name — the `off` label drops at 1×1 width). Data
+ * comes from the status cache kept fresh by [StatusWorker].
  *
- * The grid reflows across the wider 2×1 cell with no layout branching:
- * each grid row is two equal `defaultWeight` halves (instead of the old
- * left/right anchors), so the same halves are tight at 1×1 and widen with
- * the 2×1 span. The name budget is always [CELL_NAME_MAX] (4 chars) at
- * both sizes: the launcher instance options carry the cell POSITION
- * (`cellX`, the 0-based column of the widget's top-left corner), not its
- * span, so a span-based budget can't be read from the stable options API
- * — the narrow budget is the only one guaranteed to fit every placement.
+ * Display settings (Settings → Widget, stored in [Prefs], applied at
+ * render time for BOTH the 1×1 and 2×1 placements):
+ *  - grid columns: 2 (the default look) = dot + name pairs, one row of two
+ *    cells; 1 = one row per server (see [widgetGridRows]);
+ *  - which servers to show: the stored selection, `null` = all (the
+ *    default); stale ids (removed servers) are dropped silently by
+ *    [resolveWidgetServers] — never rendered, never a crash.
+ * The hero counts only the servers actually shown (N/`shown.size` UP), so
+ * a filtered widget stays internally consistent.
+ *
+ * The two-column grid reflows across the wider 2×1 cell with no layout
+ * branching: each grid row is two equal `defaultWeight` halves (instead of
+ * the old left/right anchors), so the same halves are tight at 1×1 and
+ * widen with the 2×1 span. The name budget is always [CELL_NAME_MAX]
+ * (4 chars) at both sizes: the launcher instance options carry the cell
+ * POSITION (`cellX`, the 0-based column of the widget's top-left corner),
+ * not its span, so a span-based budget can't be read from the stable
+ * options API — the narrow budget is the only one guaranteed to fit every
+ * placement. A placed widget is always at least one home-grid column wide
+ * (≈94 dp on the Pixel 7 Pro, ≈89 dp on the A52 — the 40dp declared
+ * minimum only affects the launcher PICKER's tile size, not the placed
+ * widget), so the live type sizes fit with budget to spare.
  *
  * Tight rows — how the padding between rows is fixed:
  *  - Glance 1.1.0's `Text`/`TextStyle` exposes **no `lineHeight`** and the
@@ -72,9 +86,10 @@ private val DotRed = Color(0xFFF44336)
  *    Worst-case content is ≈82 dp in the ≈89 dp 1×1 cell.
  *
  * Glance notes:
- *  - Column allows at most 10 children: hero (1) + freshness (1) + 3 grid
- *    rows + overflow (1) = at most 6; the grid shows at most [MAX_GRID_CELLS]
- *    servers (a "+N" line for the rest), the app shows the full list.
+ *  - Column allows at most 10 children: hero (1) + freshness (1) + at most
+ *    4 grid rows (the per-mode [widgetMaxCells] budget) + overflow (1) =
+ *    at most 7; the grid shows at most [widgetMaxCells] servers (a "+N"
+ *    line for the rest), the app shows the full list.
  *  - Glance 1.1.0 `RowScope` has no `weight` (`defaultWeight` only shares
  *    space between cells, it can't cap name width), so the two-column grid
  *    is built from two equal `defaultWeight` half-Columns per row (the name
@@ -84,9 +99,6 @@ private val DotRed = Color(0xFFF44336)
 class ServerWidget : GlanceAppWidget() {
 
     companion object {
-        /** 1×1 budget: hero + a two-column grid of up to 6 servers (3 rows). */
-        private const val MAX_GRID_CELLS = 6
-
         /** Visible grid cell name chars before the "…" (10sp Medium, 1×1 half-cell width). */
         private const val CELL_NAME_MAX = 4
 
@@ -105,13 +117,17 @@ class ServerWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val cached = Prefs.cache(context)
-        val items = runCatching { cached?.let { parseStatusArray(it) } }
+        val live = runCatching { cached?.let { parseStatusArray(it) } }
             .getOrNull() ?: emptyList()
+        // Display settings (Settings → Widget): which servers to show
+        // (null = all; stale ids drop silently) and the grid's column mode.
+        val columns = normalizeWidgetColumns(Prefs.widgetColumns(context))
+        val items = resolveWidgetServers(live, Prefs.widgetSelectedServerIds(context))
         val upCount = items.count { it.online }
         val allUp = items.isNotEmpty() && upCount == items.size
         val cacheTime = Prefs.cacheTime(context)
-        val shown = items.take(MAX_GRID_CELLS)
-        val hidden = items.size - shown.size
+        val rows = widgetGridRows(items, columns)
+        val hidden = widgetOverflow(items, columns)
 
         // Colored by the up/down verdict (green all-up, red otherwise).
         val verdictColor = ColorProvider(if (allUp) DotGreen else DotRed)
@@ -168,24 +184,29 @@ class ServerWidget : GlanceAppWidget() {
                         style = freshStyle,
                     )
 
-                    // two-column grid of server cells (dot + name). Each row
-                    // is two equal weighted halves: RowScope has no per-cell
-                    // `weight` (only `defaultWeight`), so a fill-width Column
-                    // per column gives the even two-column split that
-                    // reflows across the 2×1 span.
-                    shown.chunked(2).forEach { pair ->
+                    // Grid of server cells (dot + name). Two columns: each
+                    // row is two equal weighted halves — RowScope has no
+                    // per-cell `weight` (only `defaultWeight`), so a
+                    // fill-width Column per column gives the even
+                    // two-column split that reflows across the 2×1 span.
+                    // One column: one row per server, full width.
+                    rows.forEach { rowItems ->
                         Row(
                             modifier = GlanceModifier
                                 .fillMaxWidth()
                                 .height(cellHeight),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(GlanceModifier.defaultWeight()) {
-                                cell(pair.first())
-                            }
-                            if (pair.size > 1) {
+                            if (columns == WIDGET_COLUMNS_1) {
+                                cell(rowItems.first())
+                            } else {
                                 Column(GlanceModifier.defaultWeight()) {
-                                    cell(pair.last())
+                                    cell(rowItems.first())
+                                }
+                                if (rowItems.size > 1) {
+                                    Column(GlanceModifier.defaultWeight()) {
+                                        cell(rowItems.last())
+                                    }
                                 }
                             }
                         }

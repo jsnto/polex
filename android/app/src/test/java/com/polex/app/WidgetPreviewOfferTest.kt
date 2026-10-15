@@ -26,12 +26,17 @@ import org.robolectric.annotation.Config
  *  - [widgetInfoDeclaresThe1x1And2x1Offer] — the widget metadata XML is the
  *    machine-consumed artifact the launcher reads to decide what sizes to
  *    offer. Parsed into a typed model (attributes resolved with unit
- *    conversion), it must declare: min 80×80dp, max 190×80dp, minResize
- *    80×80dp, maxResize 190×80dp, resizeMode horizontal ONLY (no vertical stretch,
+ *    conversion), it must declare: min 40×80dp, max 190×80dp, minResize
+ *    40×80dp, maxResize 190×80dp, resizeMode horizontal ONLY (no vertical stretch,
  *    so the offer is 1×1 and 2×1 only), target cell 1×1, and the preview /
  *    initial layout pointing at `widget_preview`. 190dp is the 2-wide cap:
  *    on the Pixel 7 Pro's ≈121dp cell pitch a 2-wide offer needs
- *    max ≥ 1.5× the pitch.
+ *    max ≥ 1.5× the pitch. The 40dp width minimum (minWidth AND
+ *    minResizeWidth, which must agree) is the AOSP-safe floor: the launcher's
+ *    picker draws a 1-column tile only when the declared minimum fits its
+ *    column pitch (the Pixel 7 Pro's picker pitch is in [40, 80) dp), so
+ *    40dp guarantees the 1-column offer while the 80dp height minimum keeps
+ *    the offer at one row — the offer stays exactly 1×1 and 2×1, never 1×2.
  *  - [previewInflatesAndCarriesNoPlainView] — root cause of the 1×1 bug:
  *    the launcher renders `previewLayout` with its RemoteViews-based
  *    preview inflater, which refuses trees carrying classes it does not
@@ -86,12 +91,14 @@ class WidgetPreviewOfferTest {
         val a = { name: String -> parser.getAttributeValue("http://schemas.android.com/apk/res/android", name)
             ?: fail("missing android:$name in polex_widget_info.xml") }
 
-        // The offer contract, in dp.
-        assertEquals(dpPx(80), a("minWidth").toDpPx(res))
+        // The offer contract, in dp. Width minimum is the AOSP-safe 40dp
+        // floor (1-column tile on any launcher with a ≥40dp picker pitch);
+        // height minimum is one row on both test devices.
+        assertEquals(dpPx(40), a("minWidth").toDpPx(res))
         assertEquals(dpPx(80), a("minHeight").toDpPx(res))
         assertEquals(dpPx(190), a("maxWidth").toDpPx(res))
         assertEquals(dpPx(80), a("maxHeight").toDpPx(res))
-        assertEquals(dpPx(80), a("minResizeWidth").toDpPx(res))
+        assertEquals(dpPx(40), a("minResizeWidth").toDpPx(res))
         assertEquals(dpPx(80), a("minResizeHeight").toDpPx(res))
         assertEquals(dpPx(190), a("maxResizeWidth").toDpPx(res))
         assertEquals(dpPx(80), a("maxResizeHeight").toDpPx(res))

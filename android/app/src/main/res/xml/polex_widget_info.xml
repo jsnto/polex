@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Offered sizes: 1x1 and 2x1 (2 wide, 1 tall).
-     - minWidth/minHeight 80dp: one cell (the launcher rounds up to the
-       grid pitch); targetCell 1x1: the default placement size.
-     - resizeMode=horizontal: the widget may be stretched across cells but
-       never down a row, so the launcher offers 1x1 and 2x1 only — not
-       1x2/2x2.
+<!-- Offered sizes: exactly 1x1 and 2x1 (2 wide, 1 tall).
+     - minWidth 40dp / minResizeWidth 40dp: the AOSP-safe floor for a
+       1-column minimum. The launcher's picker draws a 1-column tile only
+       when the widget's declared minimum width fits the picker's column
+       pitch; the Pixel 7 Pro's picker pitch is in [40, 80) dp (its home
+       grid columns are ≈94 dp), so the old 80dp minimum exceeded the
+       pitch and the picker could only offer a 2-column tile (2x1) — the
+       1x1 offer never appeared. 40dp is the smallest width the AOSP
+       widget picker grid uses as a column pitch, so any launcher with a
+       ≥40dp pitch can draw the 1-column tile. minWidth/minResizeWidth must
+       agree: minResizeWidth is the user-resize floor and 40dp keeps the
+       resize offer inside the same 1-..-2 column range the picker shows.
+     - minHeight/minResizeHeight 80dp: one row on both test devices (Pixel
+       7 Pro rows ≈132 dp, A52 cells ≈89 dp), so the offer never spans
+       two rows.
+     - targetCell 1x1: the default placement size (the 1x1 tile renders at
+       the full home-grid column, ≈94 dp wide on the Pixel, where the
+       content — hero + freshness + grid — has its sizing budget).
+     - resizeMode=horizontal: the widget may be stretched across columns
+       but never down a row, so the launcher offers 1x1 and 2x1 only —
+       not 1x2/2x2.
      - maxWidth/maxHeight + min/maxResize (API 31+): 190dp wide is exactly
        two cells on a 4-column home grid (a 484 dp-wide screen's ≈121 dp
        cell needs ≥ 1.5× the pitch for a 2-wide offer) and 80dp tall is one
@@ -12,9 +27,9 @@
        API 31 ignore these attributes and fall back to the resizeMode
        behaviour. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="80dp"
+    android:minWidth="40dp"
     android:minHeight="80dp"
-    android:minResizeWidth="80dp"
+    android:minResizeWidth="40dp"
     android:minResizeHeight="80dp"
     android:maxResizeWidth="190dp"
     android:maxResizeHeight="80dp"
