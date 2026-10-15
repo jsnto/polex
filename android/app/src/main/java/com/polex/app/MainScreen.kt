@@ -322,7 +322,11 @@ fun MainScreen(onSettings: () -> Unit, onOpenServer: (Int) -> Unit, onAuthError:
                     }
                     if (items.isEmpty() && !loading && error.isEmpty()) {
                         Text(
-                            "No servers configured.\nOpen settings to add servers.",
+                            text = if (grayed) {
+                                "No server state cached yet — it will appear here once the backend is reachable again."
+                            } else {
+                                "No servers configured.\nOpen settings to add servers."
+                            },
                             style = MaterialTheme.typography.bodyLarge,
                         )
                     }
