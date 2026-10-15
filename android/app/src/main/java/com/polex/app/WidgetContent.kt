@@ -77,17 +77,23 @@ fun widgetOverflow(items: List<SrvStatus>, columns: Int): Int =
 // ---------------------------------------------------------------------------
 // Full-name render (no ellipsis) — the grid cell shows the server name in
 // FULL: the font scales down from the 10 sp base to the 6 sp floor so the
-// name fits the cell's width budget, and a name that still overruns at
-// the floor wraps to more lines, growing its row (the row prices the line
-// boxes, and the short-cell budget below prices the sum). The width budget
-// is pinned to the tightest 1×1 cell width (A52 ≈89 dp — the same pin
-// class as the vertical [WIDGET_HOST_BUDGET_DEFAULT_DP]): a span-agnostic
-// fit, exactly like the vertical budget — the name that fits the 89 dp
-// cell fits every wider placement (2×1, stretched cells). The model is
-// pinned pure arithmetic (testable on the JVM): average character advance
-// 0.6 em (conservative for mixed-case sans-serif; 1sp ≈ 1dp at the
-// widget's type scale — the same convention as the row-height constants),
-// line box 1.5× font.
+// name fits the cell's width budget, and a name that still overruns the
+// budget at its font WRAPS to more lines, growing its row (the row prices
+// the line boxes, and the short-cell budget below prices the sum). The
+// wrap decision is MEASURED, not modeled: [NameMeasurer] reports the
+// name's width at its RENDERED font size — the production implementation
+// (see [ServerWidget]) measures the real text at sp→px, which carries the
+// device density AND the system font scale — so a name the 0.6em font-fit
+// model calls a single line (an enlarged font scale, a wider glyph run) is
+// measured wider, prices its wrapped lines, and wraps instead of
+// clipping; the JVM tests stub the measurer deterministically. The width
+// budget is pinned to the tightest 1×1 cell width (A52 ≈89 dp — the same
+// pin class as the vertical [WIDGET_HOST_BUDGET_DEFAULT_DP]): a
+// span-agnostic fit, exactly like the vertical budget — the name that
+// fits the 89 dp cell fits every wider placement (2×1, stretched cells).
+// The font fit keeps the pinned pure arithmetic (testable on the JVM):
+// average character advance 0.6 em (a visual choice — a font the model
+// keeps at one line may still wrap, but never clips), line box 1.5× font.
 // ---------------------------------------------------------------------------
 
 /** Pinned tightest 1×1 cell WIDTH, dp (A52 ≈89 dp — same pin class as the vertical default budget). */
@@ -121,16 +127,34 @@ fun widgetNameWidthBudgetDp(columns: Int): Int {
     return half - WIDGET_CELL_DOT_WIDTH_DP - WIDGET_CELL_SPACER_DP
 }
 
-/** Pinned width model: `ceil(0.6 × len × font)` dp (average 0.6em advance). */
+/**
+ * Measures a name's rendered width (dp) at a font size — the seam the
+ * wrap decision ([widgetNameLines]) goes through. Production (see
+ * [ServerWidget]) measures the real text at the rendered size (sp→px,
+ * which carries the device density AND the system font scale), so the
+ * decision sees exactly what the render draws; the JVM tests stub it
+ * deterministically.
+ */
+fun interface NameMeasurer {
+    /** The width (dp) [name] occupies when rendered at [fontSp] sp. */
+    fun widthDp(name: String, fontSp: Int): Int
+}
+
+/** Pinned width model: `ceil(0.6 × len × font)` dp (average 0.6em advance) — the font fit only; the wrap decision uses the measured [NameMeasurer]. */
 private fun nameWidthDp(name: String, fontSp: Int): Int =
     (60 * name.length * fontSp + 99) / 100
 
 /**
  * The name font (sp) for a cell: the largest font at which the FULL name
- * fits the width budget, clamped to [WIDGET_NAME_MIN_FONT_SP,
- * [WIDGET_NAME_BASE_FONT_SP]] — short names stay at the 10 sp base (the
- * historical render), long names scale toward the 6 sp floor, where they
- * wrap instead of shrinking further ([widgetNameLines]).
+ * fits the width budget in the pinned 0.6em model, clamped to
+ * [WIDGET_NAME_MIN_FONT_SP, [WIDGET_NAME_BASE_FONT_SP]] — short names
+ * stay at the 10 sp base (the historical render), long names scale
+ * toward the 6 sp floor, where they wrap instead of shrinking further
+ * ([widgetNameLines]). The fit is the model's visual choice only: a name
+ * it calls a single line can still overrun the budget at the rendered
+ * size (an enlarged system font scale, a wider glyph run) —
+ * [widgetNameLines] measures it at the rendered size and wraps it into
+ * the priced lines instead of clipping.
  */
 fun widgetNameFontSp(name: String, columns: Int): Int {
     if (name.isEmpty()) return WIDGET_NAME_BASE_FONT_SP
@@ -140,15 +164,20 @@ fun widgetNameFontSp(name: String, columns: Int): Int {
 
 /**
  * The lines the FULL name renders in its cell at its [widgetNameFontSp]
- * — `ceil(nameWidth / budget)`: 1 for every name that fits (including at
- * the scaled fonts), ≥2 only when the name overruns the budget at the 6
- * sp floor. The row prices exactly these lines
+ * — measured, not modeled: [NameMeasurer.widthDp] reports the name's
+ * width at its RENDERED font size (the production measurer measures the
+ * real text at sp→px — the device density AND the system font scale —
+ * the same text at the same rendered size the render draws, so the price
+ * can never underestimate it), and the lines are `ceil(width / budget)`:
+ * 1 for every name that fits at its rendered size, ≥2 when it overruns
+ * the budget and wraps (an enlarged font scale or a wider glyph run the
+ * model's font fit did not see). The row prices exactly these lines
  * ([widgetCellRowHeightDp]), so no line of the name is ever clipped or
  * ellipsized.
  */
-fun widgetNameLines(name: String, columns: Int): Int {
+fun widgetNameLines(name: String, columns: Int, measure: NameMeasurer): Int {
     val budget = widgetNameWidthBudgetDp(columns)
-    val width = nameWidthDp(name, widgetNameFontSp(name, columns))
+    val width = measure.widthDp(name, widgetNameFontSp(name, columns))
     return if (width == 0) 1 else (width + budget - 1) / budget
 }
 
@@ -168,12 +197,13 @@ fun widgetCellRowHeightDp(lines: Int, fontSp: Int): Int =
  * [columns] mode — per row, the tallest cell (a two-column row is two
  * cells with possibly different fonts/wrap): the input to the short-cell
  * budget arithmetic, replacing the uniform 12dp rows for renders with
- * wrapped names.
+ * wrapped names (the wrap line count is [measure]'s measurement at the
+ * rendered size, see [widgetNameLines]).
  */
-fun widgetRowHeightsDp(items: List<SrvStatus>, columns: Int): List<Int> =
+fun widgetRowHeightsDp(items: List<SrvStatus>, columns: Int, measure: NameMeasurer): List<Int> =
     widgetGridRows(items, columns).map { row ->
         row.maxOf { s ->
-            widgetCellRowHeightDp(widgetNameLines(s.name, columns), widgetNameFontSp(s.name, columns))
+            widgetCellRowHeightDp(widgetNameLines(s.name, columns, measure), widgetNameFontSp(s.name, columns))
         }
     }
 

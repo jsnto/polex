@@ -297,8 +297,10 @@ time under it ("updated 14:32"), then a grid of servers
 doesn't fit). Server names are shown in full — no ellipsis truncation:
 each cell's font scales from 10sp toward 6sp so the name fits the cell
 (pinned to the tightest ≈89dp 1×1 width), and a name that still overruns
-wraps to a second line, growing its row (the row prices its line boxes
-and the fit rules price the sum). The widget's declared minimum width is 40dp — the AOSP-safe
+wraps to as many lines as it needs, growing its row (the wrap is
+measured against the real text at the rendered font size — including the
+system font scale — so a name is never clipped; the row prices its line
+boxes and the fit rules price the sum). The widget's declared minimum width is 40dp — the AOSP-safe
 floor that lets launchers with a ≥40dp picker column pitch offer the
 1-column (1×1) tile (the Pixel 7 Pro's picker pitch is in [40, 80) dp);
 a placed widget is always at least one home-grid column wide (≈94 dp on
