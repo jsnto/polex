@@ -4,6 +4,8 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.text.Layout
+import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.TypedValue
 import androidx.compose.runtime.Composable
@@ -37,7 +39,6 @@ import androidx.glance.unit.ColorProvider
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private val WidgetBg = Color(0xFF111827)
@@ -79,13 +80,16 @@ private val DotRed = Color(0xFFF44336)
  * corner), not its span, so a span-based budget can't be read from the
  * stable options API — the narrow budget is the only one guaranteed to fit
  * every placement), and a name that still overruns the budget at its
- * RENDERED size wraps to more lines, growing its row: the wrap line count
- * is the name's MEASURED width there ([nameMeasurer] — the real text at
- * sp→px, which carries the device density AND the system font scale), so
- * an enlarged font scale or a wider glyph run wraps into the priced lines
- * instead of clipping: the row prices its line boxes
- * (`ceil(1.5 × lines × font)`, pinned in WidgetContent.kt) and the budget
- * arithmetic prices the per-row sum. A placed widget is always at least
+ * RENDERED size wraps to its REAL line count there ([nameMeasurer] — the
+ * real text laid out at sp→px, which carries the device density AND the
+ * system font scale, wrapped at the budget width: word-wrap, char-wrap
+ * for a token longer than the line), with the font stepping down while the
+ * measured count exceeds the two-line wrapped row: the row prices its line
+ * boxes at the rendered size (`ceil(1.5 × lines × font × font scale)`,
+ * pinned in WidgetContent.kt — only a name that still exceeds two lines at
+ * the 6 sp floor keeps its full line count, the single documented
+ * exception) and the budget arithmetic prices the per-row sum. A placed
+ * widget is always at least
  * one home-grid column wide (≈94 dp on the Pixel 7 Pro, ≈89 dp on the
  * A52 — the 40dp declared minimum only affects the launcher PICKER's tile
  * size, not the placed widget), so the live type sizes fit with budget to
@@ -105,10 +109,16 @@ private val DotRed = Color(0xFFF44336)
  *    constrained vertically, so the Column advances by the tight height
  *    instead of the full line box (glyphs stay clear: the line-box padding
  *    that would collide overflows instead of pushing the next row down).
- *    A single-line name row stays the pinned 12dp; a wrapped (multi-line)
- *    name row prices its line boxes (`ceil(1.5 × lines × font)` — the
- *    per-row heights from [widgetRowHeightsDp]) at its MEASURED line count
- *    ([nameMeasurer]), so a full name never clips or breaks the row.
+ *    A single-line name row scales the pinned 12dp by the system font
+ *    scale; a wrapped (multi-line) name row prices its line boxes at the
+ *    rendered size (`ceil(1.5 × lines × font × font scale)` — the per-row
+ *    heights from [widgetRowHeightsDp]) at its MEASURED line count
+ *    ([nameMeasurer], the real wrapped count of the text at the budget
+ *    width), so every measured line of a full name is priced into the row
+ *    — the name renders in full, never clipped or ellipsized (the single
+ *    exception: a name that exceeds two lines even at the 6 sp floor
+ *    keeps its full line count; the row prices it and the short-cell fit
+ *    prices the space).
  *    Worst-case content is 84 dp (the six-server
  *    live inventory: 3 rows, two wrapped at 18dp, + freshness) in the
  *    ≈89–116 dp 1×1 cells on the default-budget hosts (A52 ≈89 dp, Pixel 7
@@ -200,9 +210,14 @@ class ServerWidget : GlanceAppWidget() {
         // decision — the full-name render, no ellipsis — is measured, not
         // modeled; see [nameMeasurer]).
         val measure = nameMeasurer(context)
-        // Per-row heights (dp): 12dp per single-line name; a wrapped name
-        // row prices its measured line boxes.
-        val rowHeights = widgetRowHeightsDp(items, columns, measure)
+        // The system font scale: the rendered text is font sp × scale
+        // (sp→px carries it), so the row prices and the fit arithmetic
+        // price what the render draws at the user's font scale.
+        val fontScale = context.resources.configuration.fontScale
+        // Per-row heights (dp): 12dp (scale-priced) per single-line name;
+        // a wrapped name row prices its measured line boxes at the
+        // rendered size.
+        val rowHeights = widgetRowHeightsDp(items, columns, fontScale, measure)
 
         // Short-cell fit (see the class KDoc and WidgetContent.kt): the
         // host's ALLOCATED height decides whether this render keeps the
@@ -353,38 +368,51 @@ class ServerWidget : GlanceAppWidget() {
 
     /**
      * Real text measurement at the rendered font size (the production
-     * [NameMeasurer]): measures [name] with the device's default typeface
+     * [NameMeasurer]): lays out [name] with the device's default typeface
      * at the [fontSp] sp RENDERED size — `TypedValue.applyDimension`
      * converts sp→px through the device density AND the system font
-     * scale, and the px→dp conversion divides only by the density — so
-     * the returned dp width is the name's true rendered width at the
-     * user's font scale, rounded up (never an underestimate): a name the
-     * 0.6em font-fit model calls a single line is measured at the size
-     * the render actually draws, and the wrap decision prices its wrapped
-     * lines instead of clipping.
+     * scale — wrapped at [budgetDp] (the budget dp at the density; the
+     * dp→px truncation can only add a line, never drop one), so the
+     * returned count is the name's true wrapped line count at the size
+     * the render actually draws (word-wrap, char-wrap for a token longer
+     * than the line — the same layout the render's TextView produces):
+     * the wrap decision, the font clamp and the row price see exactly
+     * what the render renders, instead of clipping a line the width model
+     * (or `ceil(width / budget)`) could not price.
      */
     private fun nameMeasurer(context: Context): NameMeasurer {
         val metrics = context.resources.displayMetrics
         val paint = TextPaint()
-        return NameMeasurer { name, fontSp ->
+        return NameMeasurer { name, fontSp, budgetDp ->
             paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSp.toFloat(), metrics)
-            ceil(paint.measureText(name) / metrics.density).toInt()
+            @Suppress("DEPRECATION")
+            val layout = StaticLayout(
+                name,
+                paint,
+                (budgetDp * metrics.density).toInt(),
+                Layout.Alignment.ALIGN_NORMAL,
+                1f,
+                0f,
+                false,
+            )
+            layout.lineCount
         }
     }
 
     /**
      * One grid cell: colored dot + the server name in FULL (no ellipsis):
      * the font scales from the 10 sp base toward the 6 sp floor so the
-     * name fits the pinned cell width budget, and a name that overruns
-     * the budget at its rendered size wraps to its MEASURED line count
-     * (`maxLines` — [nameMeasurer], the real text at sp→px, which carries
-     * the system font scale) — the row prices the line boxes (see
-     * WidgetContent.kt). Offline styled red (no `off` label at 1×1).
+     * name fits the pinned cell width budget, steps down while the
+     * MEASURED line count exceeds the two-line wrapped row, and a name
+     * that overruns the budget at its rendered size wraps to its full
+     * measured line count (`maxLines` — [nameMeasurer], the real text at
+     * sp→px, which carries the system font scale) — the row prices the
+     * line boxes at the rendered size (see WidgetContent.kt). Offline
+     * styled red (no `off` label at 1×1).
      */
     @Composable
     private fun RowScope.cell(s: SrvStatus, columns: Int, measure: NameMeasurer) {
-        val fontSp = widgetNameFontSp(s.name, columns)
-        val lines = widgetNameLines(s.name, columns, measure)
+        val fit = widgetNameFit(s.name, columns, measure)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "●",
@@ -399,9 +427,9 @@ class ServerWidget : GlanceAppWidget() {
                 style = TextStyle(
                     color = ColorProvider(if (s.online) TextPrimary else DotRed),
                     fontWeight = FontWeight.Medium,
-                    fontSize = fontSp.sp,
+                    fontSize = fit.fontSp.sp,
                 ),
-                maxLines = lines,
+                maxLines = fit.lines,
             )
         }
     }

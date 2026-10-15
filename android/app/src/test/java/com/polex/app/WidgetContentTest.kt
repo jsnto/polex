@@ -31,13 +31,17 @@ import org.junit.Test
  *  - full-name render (no ellipsis): the cell's name font scales from the
  *    10 sp base to the 6 sp floor against the pinned cell width budget
  *    (89dp tightest 1×1: 66dp one column, 27dp two columns), and the wrap
- *    line count is the name's MEASURED width at the rendered font size —
- *    the tests inject a deterministic [NameMeasurer] stub (the production
- *    render measures the real text at sp→px, which carries the system
- *    font scale, so a wider glyph run or an enlarged font scale wraps
- *    into the priced lines instead of clipping) — and the wrapped row
- *    prices its line boxes into the budget arithmetic (the six-server
- *    live-inventory worst case is 84 dp at the 89 dp default budget);
+ *    line count is the name's REAL wrapped count at the rendered font
+ *    size — the tests inject a deterministic word-pack [NameMeasurer]
+ *    stub (the production render lays out the real text with StaticLayout
+ *    word-wrap at the budget width, sp→px carrying the system font scale,
+ *    so a wider glyph run, an enlarged font scale, or word-boundary waste
+ *    wraps into the priced lines instead of clipping — and the font steps
+ *    down while the measured count exceeds the two-line wrapped row) —
+ *    and the rows price their line boxes at the rendered size (font ×
+ *    font scale) into the budget arithmetic (the six-server
+ *    live-inventory worst case is 84 dp at the default scale and the 89 dp
+ *    default budget);
  *  - server selection: `null` = all servers (the default), an explicit set
  *    = only those, in live-list order;
  *  - stale-selection handling: ids of removed servers are dropped silently
@@ -65,24 +69,43 @@ class WidgetContentTest {
         )
 
     /**
-     * The deterministic JVM stand-in for the production measurement at the
-     * default font scale: the pinned 0.6em advance — the budget/fit pins
-     * below go through the same measured path the render uses, with this
-     * stub.
+     * The deterministic JVM stand-in for the production measurement: a
+     * word-pack model — words pack greedily into lines of `floor(budget /
+     * (advance × font × scale))` chars, and a token longer than the line
+     * wraps character by character — the same wrap the render's TextView
+     * performs (word-wrap, char-wrap). [advanceEm] is the average char
+     * advance in hundredths of an em (60 = the pinned 0.6em model),
+     * [scale] the system font scale baked into the rendered size.
      */
-    private val modelMeasure: NameMeasurer = NameMeasurer { name, font ->
-        (60 * name.length * font + 99) / 100
-    }
+    private fun wordPackMeasure(advanceEm: Int, scale: Double = 1.0): NameMeasurer =
+        NameMeasurer { name, font, budget ->
+            val perLine = (budget / (advanceEm / 100.0 * font * scale)).toInt().coerceAtLeast(1)
+            var lines = 1
+            var used = 0
+            for (word in name.split(' ')) {
+                when {
+                    word.isEmpty() -> Unit
+                    word.length > perLine -> {
+                        if (used > 0) lines++
+                        lines += (word.length - 1) / perLine
+                        used = word.length % perLine
+                    }
+                    used == 0 -> { used = word.length }
+                    used + 1 + word.length <= perLine -> { used += 1 + word.length }
+                    else -> { lines++; used = word.length }
+                }
+            }
+            lines
+        }
+
+    /** The pinned 0.6em advance at the default font scale. */
+    private val modelMeasure: NameMeasurer = wordPackMeasure(60)
 
     /** A wider-glyph render at the default scale: 0.63em advance (the wide-glyph case the 0.6em font-fit model underestimates). */
-    private val wideGlyphMeasure: NameMeasurer = NameMeasurer { name, font ->
-        (63 * name.length * font + 99) / 100
-    }
+    private val wideGlyphMeasure: NameMeasurer = wordPackMeasure(63)
 
-    /** A default-glyph render at a 1.3× system font scale (sp→px carries the scale): 0.6 × 1.3 = 0.78em advance. */
-    private val fontScale13Measure: NameMeasurer = NameMeasurer { name, font ->
-        (78 * name.length * font + 99) / 100
-    }
+    /** A default-glyph render at a 1.3× system font scale (0.6 × 1.3 = 0.78em advance). */
+    private val fontScale13Measure: NameMeasurer = wordPackMeasure(60, scale = 1.3)
 
     // --- column modes ---
 
@@ -212,83 +235,98 @@ class WidgetContentTest {
         // 10 chars.
         // 2 columns (27dp budget): short names keep the base, long names
         // scale toward the 6 sp floor.
-        assertEquals(10, widgetNameFontSp("ai", WIDGET_COLUMNS_2))
-        assertEquals(7, widgetNameFontSp("dev200", WIDGET_COLUMNS_2))
-        assertEquals(7, widgetNameFontSp("dev400", WIDGET_COLUMNS_2))
-        assertEquals(6, widgetNameFontSp("prod480", WIDGET_COLUMNS_2))
-        assertEquals(6, widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_2))
-        assertEquals(6, widgetNameFontSp("homelab420", WIDGET_COLUMNS_2))
+        assertEquals(10, widgetNameFit("ai", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(7, widgetNameFit("dev200", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(7, widgetNameFit("dev400", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(6, widgetNameFit("prod480", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(6, widgetNameFit("i7-13700k", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(6, widgetNameFit("homelab420", WIDGET_COLUMNS_2, modelMeasure).fontSp)
         // 1 column (66dp budget): the whole live inventory fits at the
         // 10 sp base on a single line.
         for (name in listOf("i7-13700k", "ai", "dev200", "dev400", "homelab420", "prod480")) {
-            assertEquals("$name font", 10, widgetNameFontSp(name, WIDGET_COLUMNS_1))
-            assertEquals("$name lines", 1, widgetNameLines(name, WIDGET_COLUMNS_1, modelMeasure))
+            assertEquals("$name font", 10, widgetNameFit(name, WIDGET_COLUMNS_1, modelMeasure).fontSp)
+            assertEquals("$name lines", 1, widgetNameFit(name, WIDGET_COLUMNS_1, modelMeasure).lines)
         }
         // The clamp: nothing below the 6 sp floor, nothing above the base.
-        assertEquals(6, widgetNameFontSp("x".repeat(60), WIDGET_COLUMNS_2))
-        assertEquals(10, widgetNameFontSp("x", WIDGET_COLUMNS_2))
-        assertEquals(10, widgetNameFontSp("", WIDGET_COLUMNS_2))
+        assertEquals(6, widgetNameFit("x".repeat(60), WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(10, widgetNameFit("x", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(10, widgetNameFit("", WIDGET_COLUMNS_2, modelMeasure).fontSp)
+        assertEquals(1, widgetNameFit("", WIDGET_COLUMNS_2, modelMeasure).lines)
     }
 
     @Test
     fun longestLiveNamesRenderInFullWithoutEllipsis() {
         // The longest live names (10 chars — i7-13700k, homelab420):
         // 1 column: one line at the 10 sp base (55dp ≤ 66dp budget).
-        assertEquals(10, widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_1))
-        assertEquals(1, widgetNameLines("i7-13700k", WIDGET_COLUMNS_1, modelMeasure))
+        val oneCol = widgetNameFit("i7-13700k", WIDGET_COLUMNS_1, modelMeasure)
+        assertEquals(10, oneCol.fontSp)
+        assertEquals(1, oneCol.lines)
         // 2 columns: they overrun the 27dp budget at the 6 sp floor, so
         // they WRAP to two lines instead of ellipsizing — and the row
-        // prices both lines (18dp), so no line is clipped.
+        // prices both lines (18dp at the default scale), so no line is
+        // clipped.
         for (name in listOf("i7-13700k", "homelab420")) {
-            assertEquals(6, widgetNameFontSp(name, WIDGET_COLUMNS_2))
-            assertEquals(2, widgetNameLines(name, WIDGET_COLUMNS_2, modelMeasure))
-            assertEquals(
-                18,
-                widgetCellRowHeightDp(widgetNameLines(name, WIDGET_COLUMNS_2, modelMeasure), widgetNameFontSp(name, WIDGET_COLUMNS_2)),
-            )
+            val fit = widgetNameFit(name, WIDGET_COLUMNS_2, modelMeasure)
+            assertEquals(6, fit.fontSp)
+            assertEquals(2, fit.lines)
+            assertEquals(18, widgetCellRowHeightDp(fit.lines, fit.fontSp, 1f))
         }
         // The pinned contract behind "no ellipsis": at the chosen font
-        // the FULL name's measured width fits the pinned lines (lines ×
-        // budget) for every live name, in both modes.
-        for (name in listOf("i7-13700k", "homelab420", "prod480", "dev200", "dev400", "ai")) {
-            for (columns in listOf(WIDGET_COLUMNS_1, WIDGET_COLUMNS_2)) {
-                val width = modelMeasure.widthDp(name, widgetNameFontSp(name, columns))
-                val capacity = widgetNameLines(name, columns, modelMeasure) * widgetNameWidthBudgetDp(columns)
-                assertTrue(
-                    "$name @ $columns columns: the full name must fit its pinned lines",
-                    width <= capacity,
-                )
-            }
+        // the FULL name renders in its measured lines at the rendered
+        // size for every live name, in both modes — the shorter names
+        // stay one line in both budgets, the 9-10 char names wrap to two
+        // lines only in the narrow 2-column budget.
+        for (name in listOf("prod480", "dev200", "dev400", "ai")) {
+            assertEquals(1, widgetNameFit(name, WIDGET_COLUMNS_2, modelMeasure).lines)
+            assertEquals(10, widgetNameFit(name, WIDGET_COLUMNS_1, modelMeasure).fontSp)
+            assertEquals(1, widgetNameFit(name, WIDGET_COLUMNS_1, modelMeasure).lines)
         }
     }
 
     @Test
     fun wrappedRowHeightsArePinned() {
-        // A single line keeps the pinned 12dp row whatever the font (the
-        // shipped row height); a wrapped row prices its line boxes at the
-        // pinned 1.5× factor: ceil(1.5 × lines × font).
-        assertEquals(12, widgetCellRowHeightDp(1, 10))
-        assertEquals(12, widgetCellRowHeightDp(1, 6))
-        assertEquals(18, widgetCellRowHeightDp(2, 6))
-        assertEquals(21, widgetCellRowHeightDp(2, 7))
-        assertEquals(24, widgetCellRowHeightDp(2, 8))
-        assertEquals(30, widgetCellRowHeightDp(2, 10))
-        assertEquals(27, widgetCellRowHeightDp(3, 6))
+        // Priced at the RENDERED size (font × system font scale): at the
+        // default scale 1.0 the figures are the pinned ones — a single
+        // line keeps the pinned 12dp row whatever the font (the shipped
+        // row height), a wrapped row prices its line boxes at the pinned
+        // 1.5× factor: ceil(1.5 × lines × font).
+        assertEquals(12, widgetCellRowHeightDp(1, 10, 1f))
+        assertEquals(12, widgetCellRowHeightDp(1, 6, 1f))
+        assertEquals(18, widgetCellRowHeightDp(2, 6, 1f))
+        assertEquals(21, widgetCellRowHeightDp(2, 7, 1f))
+        assertEquals(24, widgetCellRowHeightDp(2, 8, 1f))
+        assertEquals(30, widgetCellRowHeightDp(2, 10, 1f))
+        assertEquals(27, widgetCellRowHeightDp(3, 6, 1f))
+        // Scale 1.3 (an enlarged system font): the price is what the
+        // render draws — the wrapped row's line boxes at the rendered
+        // 7.8dp size (1.5 × 2 × 6 × 1.3 = 23.4 → 24dp, not the
+        // scale-blind 18dp), the single-line pin scaled by the font
+        // scale (12 × 1.3 = 15.6 → 16dp — the ≈1.2× row factor stays
+        // ≈1.2× the rendered 13sp font, so the glyph span and its
+        // descenders stay inside the row), and the floor-exception
+        // three-line row (1.5 × 3 × 6 × 1.3 = 35.1 → 36dp).
+        assertEquals(24, widgetCellRowHeightDp(2, 6, 1.3f))
+        assertEquals(16, widgetCellRowHeightDp(1, 10, 1.3f))
+        assertEquals(16, widgetCellRowHeightDp(1, 6, 1.3f))
+        assertEquals(36, widgetCellRowHeightDp(3, 6, 1.3f))
     }
 
     @Test
     fun pathologicalNamesWrapInsteadOfEllipsizing() {
         // Far past the live inventory: a 40-char name prices 3 lines at
-        // the 6 sp floor in 1 column (2 lines hold 20 chars: 66dp / 3.6dp
-        // per char), row 27dp; a 16-char name prices 3 lines at the floor
-        // in 2 columns, row 27dp. The budget arithmetic prices those rows
-        // like any other — the name never clips or ellipsizes and the row
-        // layout never breaks.
-        assertEquals(6, widgetNameFontSp("x".repeat(40), WIDGET_COLUMNS_1))
-        assertEquals(3, widgetNameLines("x".repeat(40), WIDGET_COLUMNS_1, modelMeasure))
-        assertEquals(27, widgetCellRowHeightDp(3, 6))
-        assertEquals(6, widgetNameFontSp("x".repeat(16), WIDGET_COLUMNS_2))
-        assertEquals(3, widgetNameLines("x".repeat(16), WIDGET_COLUMNS_2, modelMeasure))
+        // the 6 sp floor in 1 column (18 chars per line: 66dp / 3.6dp —
+        // 18/18/4), row 27dp; a 16-char name prices 3 lines at the floor
+        // in 2 columns (7 chars per line: 7/7/2), row 27dp. The budget
+        // arithmetic prices those rows like any other — the name never
+        // clips or ellipsizes and the row layout never breaks.
+        val long = widgetNameFit("x".repeat(40), WIDGET_COLUMNS_1, modelMeasure)
+        assertEquals(6, long.fontSp)
+        assertEquals(3, long.lines)
+        assertEquals(27, widgetCellRowHeightDp(long.lines, long.fontSp, 1f))
+        val mid = widgetNameFit("x".repeat(16), WIDGET_COLUMNS_2, modelMeasure)
+        assertEquals(6, mid.fontSp)
+        assertEquals(3, mid.lines)
+        assertEquals(27, widgetCellRowHeightDp(mid.lines, mid.fontSp, 1f))
         // End to end: a single 27dp wrapped row keeps the FULL layout at
         // the 64dp tight case (63dp ≤ 64dp) and holds the row floor at
         // the 40dp floor (one row renders, priced at 63dp).
@@ -308,20 +346,15 @@ class WidgetContentTest {
         // The wide-glyph case the 0.6em font-fit model underestimates: a
         // 12-char name averaging 0.63em/char, 1 column. The model font
         // fit lands at 9 sp (model width 65dp ≤ the 66dp budget), but the
-        // MEASURED width at the rendered 9 sp is 69dp > 66dp: the name
-        // WRAPS to the two-line row (27dp) instead of clipping at
-        // maxLines=1 — the pre-measurement failure mode.
+        // MEASURED wrap at the rendered 9 sp is two lines (11 chars per
+        // line: 66dp / 5.67dp — 11/1) — the name WRAPS to the two-line
+        // row (27dp) instead of clipping at maxLines=1 — the
+        // pre-measurement failure mode.
         val name = "m".repeat(12)
-        assertEquals(9, widgetNameFontSp(name, WIDGET_COLUMNS_1))
-        assertEquals(2, widgetNameLines(name, WIDGET_COLUMNS_1, wideGlyphMeasure))
-        assertEquals(
-            27,
-            widgetCellRowHeightDp(widgetNameLines(name, WIDGET_COLUMNS_1, wideGlyphMeasure), widgetNameFontSp(name, WIDGET_COLUMNS_1)),
-        )
-        // The measured width fits its priced lines — nothing clips.
-        assertTrue(
-            wideGlyphMeasure.widthDp(name, 9) <= 2 * widgetNameWidthBudgetDp(WIDGET_COLUMNS_1),
-        )
+        val fit = widgetNameFit(name, WIDGET_COLUMNS_1, wideGlyphMeasure)
+        assertEquals(9, fit.fontSp)
+        assertEquals(2, fit.lines)
+        assertEquals(27, widgetCellRowHeightDp(fit.lines, fit.fontSp, 1f))
     }
 
     @Test
@@ -329,20 +362,70 @@ class WidgetContentTest {
         // The font-scale case the 0.6em font-fit model underestimates:
         // "i7-13700k" (9 chars) at a 1.3× system font scale, 1 column.
         // The model font fit keeps the 10 sp base (model width 54dp ≤ the
-        // 66dp budget), but the MEASURED width at the rendered 10 sp
-        // (sp→px carries the 1.3 scale — 71dp) overruns the 66dp budget:
-        // the name WRAPS to the two-line row (30dp) instead of clipping
-        // at maxLines=1 — the pre-measurement failure mode.
-        assertEquals(10, widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_1))
-        assertEquals(2, widgetNameLines("i7-13700k", WIDGET_COLUMNS_1, fontScale13Measure))
-        assertEquals(
-            30,
-            widgetCellRowHeightDp(widgetNameLines("i7-13700k", WIDGET_COLUMNS_1, fontScale13Measure), widgetNameFontSp("i7-13700k", WIDGET_COLUMNS_1)),
-        )
-        // The measured width fits its priced lines — nothing clips.
-        assertTrue(
-            fontScale13Measure.widthDp("i7-13700k", 10) <= 2 * widgetNameWidthBudgetDp(WIDGET_COLUMNS_1),
-        )
+        // 66dp budget), but the MEASURED wrap at the rendered 13sp size
+        // (sp→px carries the 1.3 scale — 8 chars per line: 66dp / 7.8dp —
+        // 8/1) overruns the 66dp budget: the name WRAPS to the two-line
+        // row, priced at the rendered size (1.5 × 2 × 10 × 1.3 = 39.0 →
+        // 39dp) instead of clipping at maxLines=1 — the
+        // pre-measurement failure mode.
+        val fit = widgetNameFit("i7-13700k", WIDGET_COLUMNS_1, fontScale13Measure)
+        assertEquals(10, fit.fontSp)
+        assertEquals(2, fit.lines)
+        assertEquals(39, widgetCellRowHeightDp(fit.lines, fit.fontSp, 1.3f))
+    }
+
+    @Test
+    fun threeWordNameAtEnlargedScaleFallsBackToTheFloorLineCount() {
+        // The word-boundary case the old ceil(width / budget) price
+        // under-priced: "rack one nas" (12 chars, 3 words) at the 1.3×
+        // font scale, 2 columns. The model fit clamps to the 6 sp floor,
+        // and the MEASURED word wrap at the rendered 7.8dp size — 5 chars
+        // per line (27dp / 4.68dp) — is 3 lines: 'rack' / 'one' / 'nas'
+        // (a word pair + the space overruns the 27dp budget, so every
+        // word takes its own line — the width model priced ceil(47.3dp /
+        // 27dp) = 2, a clipped third line). At the floor the name keeps
+        // its full measured line count — the single
+        // physically-necessary exception — and the row prices all three
+        // lines at the rendered size (1.5 × 3 × 6 × 1.3 = 35.1 → 36dp),
+        // so the third word renders instead of clipping at maxLines=2.
+        val fit = widgetNameFit("rack one nas", WIDGET_COLUMNS_2, fontScale13Measure)
+        assertEquals(6, fit.fontSp)
+        assertEquals(3, fit.lines)
+        assertEquals(36, widgetCellRowHeightDp(fit.lines, fit.fontSp, 1.3f))
+    }
+
+    @Test
+    fun threeWideWordsAtDefaultScaleWrapToThreeLines() {
+        // The default-scale sibling — no font-scale change needed:
+        // 'wwww wwww wwww' (14 chars) in 2 columns. The old price was 2
+        // lines (ceil(43.2dp / 27dp)), but the real word wrap at the 6 sp
+        // floor is 3 lines: a word pair + the space (9 chars = 32.4dp)
+        // overruns the 27dp budget (7 chars per line), so each word takes
+        // its own line. The row prices all three (27dp) — the third word
+        // renders instead of clipping at maxLines=2.
+        val fit = widgetNameFit("wwww wwww wwww", WIDGET_COLUMNS_2, modelMeasure)
+        assertEquals(6, fit.fontSp)
+        assertEquals(3, fit.lines)
+        assertEquals(27, widgetCellRowHeightDp(fit.lines, fit.fontSp, 1f))
+    }
+
+    @Test
+    fun fontFitStepsDownWhileTheMeasuredCountExceedsTwoLines() {
+        // The clamp step: the model fit keeps the 10 sp base, but the
+        // measured wrap is 3 lines until the font steps down to 7 sp (2
+        // lines there) — the fit must price the name at 7 sp, not the
+        // model's 10 sp (whose third line would clip at maxLines=2).
+        val step = NameMeasurer { _, font, _ -> if (font > 7) 3 else 2 }
+        val fit = widgetNameFit("x", WIDGET_COLUMNS_2, step)
+        assertEquals(7, fit.fontSp)
+        assertEquals(2, fit.lines)
+        // And it never steps below the 6 sp floor: a name that measures
+        // 3 lines at every font keeps the floor font and its full
+        // measured count (the documented floor fallback).
+        val never = NameMeasurer { _, _, _ -> 3 }
+        val floor = widgetNameFit("rack one nas", WIDGET_COLUMNS_2, never)
+        assertEquals(6, floor.fontSp)
+        assertEquals(3, floor.lines)
     }
 
     @Test
@@ -359,12 +442,12 @@ class WidgetContentTest {
         val columns = WIDGET_COLUMNS_2
         val rows = widgetGridRows(live, columns)
         assertEquals(3, rows.size)
-        assertEquals(listOf(18, 12, 18), widgetRowHeightsDp(live, columns, modelMeasure))
+        assertEquals(listOf(18, 12, 18), widgetRowHeightsDp(live, columns, 1f, modelMeasure))
         assertEquals(0, widgetOverflow(live, columns)) // all six fit the 6-cell budget
         // 89dp-class 1×1: the full layout (84dp — the two wrapped rows
         // price 18dp each instead of 12dp) fits: all six listed, no
         // overflow line, freshness kept.
-        val layout = widgetVerticalLayout(widgetRowHeightsDp(live, columns, modelMeasure), widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        val layout = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(3, layout.gridRows)
         assertTrue(layout.showFreshness)
         assertEquals(84, layout.allocatedHeightDp)
@@ -374,24 +457,40 @@ class WidgetContentTest {
         // the 74dp compact (freshness drops, the rows stay).
         for (pitch in 40..79) {
             val budget = 2 * pitch
-            val l = widgetVerticalLayout(widgetRowHeightsDp(live, columns, modelMeasure), false, budget)
+            val l = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), false, budget)
             assertEquals("$budget dp: all six list as 3 rows", 3, l.gridRows)
             assertEquals(0, live.size - rows.take(l.gridRows).sumOf { it.size })
         }
         // 1×1 at the 40dp floor: the row floor holds — one row renders
         // (the wrapped 18dp first row), "+4 more" carries the remainder.
-        val floor = widgetVerticalLayout(widgetRowHeightsDp(live, columns, modelMeasure), false, WIDGET_CELL_FLOOR_DP)
+        val floor = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), false, WIDGET_CELL_FLOOR_DP)
         assertEquals(1, floor.gridRows)
         assertEquals(4, live.size - rows.take(floor.gridRows).sumOf { it.size })
         // 1 column, 1×1 (89dp-class): the live names all fit one line at
         // the 10 sp base (12dp rows) — three listed + a "+3 more".
-        val oneColHeights = widgetRowHeightsDp(live, WIDGET_COLUMNS_1, modelMeasure)
+        val oneColHeights = widgetRowHeightsDp(live, WIDGET_COLUMNS_1, 1f, modelMeasure)
         assertEquals(listOf(12, 12, 12), oneColHeights)
         assertEquals(3, widgetOverflow(live, WIDGET_COLUMNS_1))
         val oneCol = widgetVerticalLayout(oneColHeights, true, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(3, oneCol.gridRows)
         assertTrue(oneCol.showFreshness)
         assertEquals(widgetLayoutHeightDp(3, true, true), oneCol.allocatedHeightDp) // 82dp
+        // The same inventory at the 1.3× font scale: the rendered size
+        // carries the scale (7.8dp for the 6 sp floor — 5 chars per line
+        // at the 27dp budget; 5.46dp for the 7 sp dev200/dev400 — 4), so
+        // the 9-10 char names wrap to two lines at 6 sp (24dp rows —
+        // 1.5 × 2 × 6 × 1.3 = 23.4 → 24, not the scale-blind 18dp) and
+        // the 6-char dev200/dev400 wrap at their 7 sp model fit (28dp —
+        // 1.5 × 2 × 7 × 1.3 = 27.3 → 28): the 89dp default host drops
+        // one row into the "+N more" count (88dp = 18 + 24 + 28 + 10 + 8)
+        // instead of clipping the line boxes.
+        val scaleHeights = widgetRowHeightsDp(live, columns, 1.3f, fontScale13Measure)
+        assertEquals(listOf(24, 28, 24), scaleHeights)
+        val scaleLayout = widgetVerticalLayout(scaleHeights, widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        assertEquals(2, scaleLayout.gridRows)
+        assertFalse(scaleLayout.showFreshness)
+        assertEquals(88, scaleLayout.allocatedHeightDp)
+        assertEquals(2, live.size - rows.take(scaleLayout.gridRows).sumOf { it.size })
     }
 
     @Test
