@@ -146,7 +146,8 @@ The widget is offered at 1×1 (the default placement size) and 2×1 (2 wide,
 1 tall) on every launcher, plus 1×2 and 2×2 on launchers with a row pitch
 under 80dp (e.g. the Samsung S26 Ultra's One UI launcher) — in the
 two-column layout the grid's pairs widen across the extra cell; server
-names stay truncated to the same 4-char budget at both sizes. Its declared
+names are shown in full — no ellipsis (the `../README.md` Widget
+section owns the render rules). Its declared
 minimum width is 40dp — the AOSP-safe floor that lets a
 launcher offer the 1-column tile when its picker column pitch is ≥40dp
 (the Pixel 7 Pro's picker pitch is in [40, 80) dp; a placed widget is
@@ -159,8 +160,8 @@ A52 ≈89dp) stay at exactly one row; on such short rows the widget
 renders compact, dropping the secondary "updated HH:mm" line when the row
 can't hold the full layout (the budget is the tightest of the candidate
 allocations the launcher reports, read from the stable widget options
-(API 31+) — hosts that don't report an allocation keep the unchanged
-full layout). It is a
+(API 31+) — the fallback and fit rules, including the always-rendered
+row floor, are in the `../README.md` Widget section). It is a
 colored `N/M UP` hero with the
 data-freshness
 time under it ("updated 14:32"), then a grid of servers

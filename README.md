@@ -294,7 +294,17 @@ there): a colored
 `N/M UP` hero with the data-freshness
 time under it ("updated 14:32"), then a grid of servers
 (green/red dot + name; offline servers shown in red, `+N more` for what
-doesn't fit). The widget's declared minimum width is 40dp — the AOSP-safe
+doesn't fit). Server names are shown in full — no ellipsis truncation:
+each cell's font scales from 10sp toward 6sp so the name fits the cell
+(pinned to the tightest ≈89dp 1×1 width), and a name that still overruns
+wraps to as many lines as it needs, growing its row (the line count is
+the name's REAL wrapped count at the rendered font size — measured
+word-wrap at the cell's width budget, system font scale included — and
+the font steps down toward 6sp while it exceeds two lines, so a name
+renders in full: every measured line is priced into the row height at
+the rendered size; only a name that still exceeds two lines at 6sp keeps
+its full line count, the row prices it and the fit rules carry the
+space). The widget's declared minimum width is 40dp — the AOSP-safe
 floor that lets launchers with a ≥40dp picker column pitch offer the
 1-column (1×1) tile (the Pixel 7 Pro's picker pitch is in [40, 80) dp);
 a placed widget is always at least one home-grid column wide (≈94 dp on
@@ -307,8 +317,12 @@ now 1×1, 2×1, 1×2 and 2×2 are all placeable); on such short rows the
 widget renders compact, dropping the secondary "updated HH:mm" line when
 the row can't hold the full layout (the budget is the tightest of the
 candidate allocations the launcher reports, read from the stable widget
-options (API 31+) — hosts that don't report an allocation, like the Pixel
-and A52, keep the unchanged full layout). **What it shows is configurable in
+options (API 31+); a report below the 40dp declared height floor is
+implausible — a launcher can't allocate a widget below its declared
+minimum — so it, like a missing report, falls back to the 89dp default:
+hosts that don't report an allocation, like the Pixel and A52, keep the
+unchanged full layout). The grid keeps at least one server row at every
+legal allocation; `+N more` carries only the servers beyond what fits. **What it shows is configurable in
 Settings → Widget**: the grid layout (two columns = dot + name pairs, the
 default, or one column = one row per server) and which servers to show
 (multi-select over the server list, default all; removed servers are
