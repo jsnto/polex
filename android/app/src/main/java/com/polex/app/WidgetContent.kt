@@ -184,9 +184,10 @@ fun widgetBudgetDp(allocatedHeightDp: Int?): Int =
  * [desiredGridRows] is the row count after the per-mode [widgetMaxCells]
  * budget (at most 3); [overflow] is whether the "+N more" line is present
  * at all (more servers than the budget shows). The returned layout is
- * guaranteed ≤ [budgetDp] whenever the budget holds at least the hero row
- * (26 dp — hero + padding, below any launcher row pitch ≥ 40 dp, the
- * AOSP-safe floor).
+ * guaranteed ≤ [budgetDp] whenever the budget holds at least 36 dp (hero
+ * + the overflow line + padding — the row-drop branch's floor, since the
+ * line always renders once rows drop — below any launcher row pitch
+ * ≥ 40 dp, the AOSP-safe floor).
  */
 data class WidgetVerticalLayout(
     /** Server-grid rows to render (≤ [desiredGridRows]). */
@@ -204,6 +205,6 @@ fun widgetVerticalLayout(desiredGridRows: Int, overflow: Boolean, budgetDp: Int)
     val compact = widgetLayoutHeightDp(desiredGridRows, freshness = false, overflow = overflow)
     if (compact <= budgetDp) return WidgetVerticalLayout(desiredGridRows, false, compact)
     var rows = desiredGridRows
-    while (rows > 0 && widgetLayoutHeightDp(rows, freshness = false, overflow = overflow) > budgetDp) rows--
-    return WidgetVerticalLayout(rows, false, widgetLayoutHeightDp(rows, freshness = false, overflow = overflow))
+    while (rows > 0 && widgetLayoutHeightDp(rows, freshness = false, overflow = true) > budgetDp) rows--
+    return WidgetVerticalLayout(rows, false, widgetLayoutHeightDp(rows, freshness = false, overflow = true))
 }

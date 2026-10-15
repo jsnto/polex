@@ -203,6 +203,28 @@ class WidgetContentTest {
     }
 
     @Test
+    fun rowDropPricesTheGuaranteedOverflowLine() {
+        // Dropping rows makes the render show the "+N more" line from the
+        // POST-fit count even when the pre-fit overflow flag was false (6
+        // servers, 2 columns: 3 rows fill the 6-cell budget → no pre-fit
+        // overflow) — the decision must price that line.
+        val layout = widgetVerticalLayout(3, false, 50)
+        assertEquals(1, layout.gridRows)
+        assertFalse(layout.showFreshness)
+        // The guaranteed overflow line is priced into the returned height:
+        // 48 dp = hero + 1 row + overflow line + padding, not the 50 dp
+        // unpriced shape (whose render would add a 10dp line the decision
+        // never priced, clipping the allocation).
+        assertEquals(widgetLayoutHeightDp(1, false, true), layout.allocatedHeightDp)
+        // Same invariant at a 56 dp allocation (short-row host):
+        // 1 row + overflow line = 48 dp ≤ 56.
+        val taller = widgetVerticalLayout(3, false, 56)
+        assertEquals(1, taller.gridRows)
+        assertFalse(taller.showFreshness)
+        assertEquals(48, taller.allocatedHeightDp)
+    }
+
+    @Test
     fun shortBudgetLayoutNeverExceedsTheBudget() {
         // Every shape at the 64 dp tight case fits the budget.
         for (rows in 0..3) {
