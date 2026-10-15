@@ -55,7 +55,7 @@ errors. Prefer that over manual runs when verifying app changes.
 | `Api.kt`           | Blocking OkHttp client (`Api.get/post/put/delete` → `Result(code, body)`); sends `Authorization: Bearer <Api.authToken>` when set. Always call via **`Api.safe { … }`** (runs on the IO dispatcher, maps connection failures to `Result(-1, …)` so callers branch on `code` alone); `Api.sendWol(context, id)` is the WOL POST helper and `Api.sendShutdown(context, id)` the clean-SSH-shutdown POST helper. Raw OkHttp must never be touched from UI code |
 | `Prefs.kt`         | SharedPreferences: backend base URL, auth token, cached `/api/status` JSON (also read by the widget) |
 | `Model.kt`         | `SrvStatus` / `SrvEntry` (+ `check` field, `"tcp"`/`"ping"`; + `sshUser`/`sshKeyPath`/`sshPassword`/`poweroffCommand`, `lastShutdownAt`) + JSON (org.json) parse/format helpers; `serverToJson(name, ip, mac, port, check, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?)`, `reorderJson(ids)`, `parseOk(body)` (`"ok"` flag), `sshConfigured()` (user plus a key path and/or password — mirrors the backend predicate), `effectivePoweroffCommand()` (per-server `poweroffCommand` or the default `DEFAULT_POWEROFF_COMMAND` = `sudo systemctl poweroff`), `parseEpoch`/`relativeTime` |
-| `ServerWidget.kt`  | Glance `GlanceAppWidget` (`ServerWidget`) + `ServerWidgetProvider`. Offered at **1×1 (default, `targetCellWidth/Height = 1`) and 2×1** (`polex_widget_info.xml`: `resizeMode=horizontal` + 190 dp width cap → 2 wide × 1 tall only): a colored `N/M UP` hero row (16 sp) with the `updated HH:mm` freshness line under it, then a grid of server cells (dot + name) in the Prefs column mode (Settings → Widget; default 2 columns — each row two equal `defaultWeight` half-Columns that reflow across the 2×1 span — or 1 column, one row per server): the name budget is always `CELL_NAME_MAX` (4 chars) at both sizes, since the launcher's instance options carry the cell position (`cellX`), not the span; offline = red dot + red name — the `off` label drops at 1×1; at most `widgetMaxCells` per mode (6 cells in 2 columns, 3 in 1 — 3 rows either way) + `+N more` overflow. Rows are fixed dp heights (18 dp hero, 10 dp freshness/overflow, 12 dp grid rows) — Glance 1.1.0's `TextStyle` has no `lineHeight`, so the fixed heights are the only lever to keep the rows tight in the ≈89 dp cell. Whole widget is `clickable` → `actionStartActivity` opens `MainActivity`. Renders from the Prefs cache, never from the network |
+| `ServerWidget.kt`  | Glance `GlanceAppWidget` (`ServerWidget`) + `ServerWidgetProvider`. Offered at **1×1 (default, `targetCellWidth/Height = 1`) and 2×1 on every launcher, plus 1×2/2×2 on short-row launchers (row pitch <80dp, e.g. One UI)** (`polex_widget_info.xml`: `resizeMode=horizontal|vertical` + 40×40 dp floor + 190×80 dp caps → 1-2 columns × 1 row at row pitch ≥80dp, 1-2 × 1-2 rows below): a colored `N/M UP` hero row (16 sp) with the `updated HH:mm` freshness line under it, then a grid of server cells (dot + name) in the Prefs column mode (Settings → Widget; default 2 columns — each row two equal `defaultWeight` half-Columns that reflow across the 2×1 span — or 1 column, one row per server): the name budget is always `CELL_NAME_MAX` (4 chars) at both sizes, since the launcher's instance options carry the cell position (`cellX`), not the span; offline = red dot + red name — the `off` label drops at 1×1; at most `widgetMaxCells` per mode (6 cells in 2 columns, 3 in 1 — 3 rows either way) + `+N more` overflow. Rows are fixed dp heights (18 dp hero, 10 dp freshness/overflow, 12 dp grid rows) — Glance 1.1.0's `TextStyle` has no `lineHeight`, so the fixed heights are the only lever to keep the rows tight in the ≈89 dp cell. Whole widget is `clickable` → `actionStartActivity` opens `MainActivity`. Renders from the Prefs cache, never from the network |
 | `StatusWorker.kt`  | WorkManager `CoroutineWorker`; fetches status, writes cache, calls `ServerWidget.refreshAll`. Two triggers: the 15-min periodic job and `enqueueNow` (one-shot) fired by the widget's system tick **and** by the `WidgetAlarm` inexact alarm |
 | `WidgetAlarm.kt`   | Self-rescheduling **inexact** alarm (~15 min, `setAndAllowWhileIdle`, no permission) + `WidgetRefreshReceiver` that calls `StatusWorker.enqueueNow` and re-arms itself. Belt-and-braces against the system deferring the WorkManager periodic job (which is what left the widget stale until the app was opened). Scheduled once in `MainActivity.onCreate` |
 
@@ -195,8 +195,9 @@ errors. Prefer that over manual runs when verifying app changes.
     `androidx.glance.appwidget.action.actionStartActivity(Intent(context,
     MainActivity::class.java))` on the root Column's modifier. The widget is
     intentionally compact — default 1×1 cell (`targetCellWidth/Height = 1` in
-    `res/xml/polex_widget_info.xml`), offered at 2×1 as well (horizontal
-    resize only): colored `N/M UP` hero + freshness line
+    `res/xml/polex_widget_info.xml`), offered at 2×1 as well (and at
+    1×2/2×2 on short-row launchers — `resizeMode=horizontal|vertical`):
+    colored `N/M UP` hero + freshness line
     over a 1- or 2-column dot+name grid (the Prefs display mode, default 2)
     with `+N more` overflow. Keep it that way.
   - `Text` in 1.1.0 has **no `overflow` parameter** (only `text`, `modifier`,
@@ -205,7 +206,8 @@ errors. Prefer that over manual runs when verifying app changes.
   - There is **no vertical spacing between server rows** (rows are placed
     back-to-back; no per-row padding). Glance `TextStyle` has no
     `lineHeight`, so the row-to-row gap is controlled by the fixed dp row
-    heights (`heroHeight` 18 / `freshHeight` 10 / `cellHeight` 12 dp in
+    heights (the `WIDGET_*_HEIGHT_DP` constants in `WidgetContent.kt` —
+    hero 18 / freshness 10 / grid row 12 / overflow 10 dp — read by
     `ServerWidget.kt`) — don't add per-row `padding`.
 - Res files: `res/xml/polex_widget_info.xml` (widget metadata),
   `res/layout/widget_preview.xml` (widget preview), launcher icon is adaptive

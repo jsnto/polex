@@ -143,12 +143,24 @@ screen. It appears empty until the first background refresh succeeds or you
 open the app once (the app refreshes the widget on every status poll).
 
 The widget is offered at 1×1 (the default placement size) and 2×1 (2 wide,
-1 tall — in the two-column layout the grid's pairs widen across the extra
-cell; server names stay truncated to the same 4-char budget at both sizes).
-Its declared minimum width is 40dp — the AOSP-safe floor that lets a
+1 tall) on every launcher, plus 1×2 and 2×2 on launchers with a row pitch
+under 80dp (e.g. the Samsung S26 Ultra's One UI launcher) — in the
+two-column layout the grid's pairs widen across the extra cell; server
+names stay truncated to the same 4-char budget at both sizes. Its declared
+minimum width is 40dp — the AOSP-safe floor that lets a
 launcher offer the 1-column tile when its picker column pitch is ≥40dp
 (the Pixel 7 Pro's picker pitch is in [40, 80) dp; a placed widget is
-always at least one home-grid column wide, ≈94 dp on the Pixel). It is a
+always at least one home-grid column wide, ≈94 dp on the Pixel). The
+declared height floor is the same 40dp (1-row minimum everywhere); the
+80dp height max offers 1-2 rows on short-row launchers (pitch <80dp —
+where the old 80dp floor made the picker offer only a 1×2 tile, so the
+1×1/2×1 offers were missing) while tall-row launchers (Pixel ≈116dp,
+A52 ≈89dp) stay at exactly one row; on such short rows the widget
+renders compact, dropping the secondary "updated HH:mm" line when the row
+can't hold the full layout (the budget is the tightest of the candidate
+allocations the launcher reports, read from the stable widget options
+(API 31+) — hosts that don't report an allocation keep the unchanged
+full layout). It is a
 colored `N/M UP` hero with the
 data-freshness
 time under it ("updated 14:32"), then a grid of servers
@@ -159,8 +171,8 @@ doesn't fit). **Tapping it opens the app**.
 (2 columns = dot + name pairs, the default, or 1 column = one row per
 server) and which servers to show (a multi-select over the server list,
 default all; a removed server is dropped from the selection silently). A
-change re-renders the widget immediately. Both settings apply to the 1×1
-and 2×1 renders alike.
+change re-renders the widget immediately. Both settings apply to every
+offered render alike.
 
 **Windows:** see `../scripts/windows/build-apk.ps1` and
 `../scripts/windows/test-emulator.ps1` (Docker Desktop).

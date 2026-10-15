@@ -1,36 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Offered sizes: exactly 1x1 and 2x1 (2 wide, 1 tall).
-     - minWidth 40dp / minResizeWidth 40dp: the AOSP-safe floor for a
-       1-column minimum. The launcher's picker draws a 1-column tile only
-       when the widget's declared minimum width fits the picker's column
-       pitch; the Pixel 7 Pro's picker pitch is in [40, 80) dp (its home
-       grid columns are ≈94 dp), so the old 80dp minimum exceeded the
-       pitch and the picker could only offer a 2-column tile (2x1) — the
-       1x1 offer never appeared. 40dp is the smallest width the AOSP
-       widget picker grid uses as a column pitch, so any launcher with a
-       ≥40dp pitch can draw the 1-column tile. minWidth/minResizeWidth must
-       agree: minResizeWidth is the user-resize floor and 40dp keeps the
-       resize offer inside the same 1-..-2 column range the picker shows.
-     - minHeight/minResizeHeight 80dp: one row on both test devices (Pixel
-       7 Pro rows ≈132 dp, A52 cells ≈89 dp), so the offer never spans
-       two rows.
-     - targetCell 1x1: the default placement size (the 1x1 tile renders at
-       the full home-grid column, ≈94 dp wide on the Pixel, where the
-       content — hero + freshness + grid — has its sizing budget).
-     - resizeMode=horizontal: the widget may be stretched across columns
-       but never down a row, so the launcher offers 1x1 and 2x1 only —
-       not 1x2/2x2.
-     - maxWidth/maxHeight + min/maxResize (API 31+): 190dp wide is exactly
-       two cells on a 4-column home grid (a 484 dp-wide screen's ≈121 dp
-       cell needs ≥ 1.5× the pitch for a 2-wide offer) and 80dp tall is one
-       row; this keeps the offer capped at 2 wide x 1 tall. Launchers below
-       API 31 ignore these attributes and fall back to the resizeMode
-       behaviour. -->
+<!-- Offered sizes: 1x1 and 2x1 (2 wide, 1 tall) on every launcher, plus
+     1x2 and 2x2 on launchers with a row pitch under 80dp (e.g. the Samsung
+     S26 Ultra's One UI launcher, where a 2-row placement is the launcher's
+     native short-row cell). Offer matrix (pitch = the launcher's grid
+     pitch; column range = ceil(minWidth/pitch)..floor-style max from
+     maxWidth, row range = ceil(minHeight/pitch)..ceil(maxHeight/pitch)):
+     - WIDTH 40..190dp: 1 column on every launcher with a ≥40dp column
+       pitch (40dp is the smallest pitch the AOSP widget picker grid uses,
+       the same AOSP-safe floor as before — the Pixel 7 Pro's picker pitch
+       is in [40, 80) dp, so the old 80dp minimum hid the 1-column tile);
+       2 columns whenever 190dp ≥ 1.5× the pitch (a 484 dp-wide screen's
+       ≈121 dp cell — the Pixel — and the ≈89-95 dp cells of the A52 and
+       S26-class grids all qualify) → 1-2 columns.
+     - HEIGHT 40..80dp: min = 40dp keeps the 1-row minimum on every
+       launcher (ceil(40/pitch) = 1 for pitch ≥ 40dp) — including
+       launchers whose row pitch is shorter than the old 80dp floor (the
+       One UI / S26 Ultra case: its pitch is under 80 dp, so the old 80dp
+       floor forced a 2-row minimum and, with the max also 80dp, locked
+       the range at two rows — the picker offered only 1x2). max = 80dp
+       offers 1-2 rows on short-row launchers (ceil(80/pitch) = 2 for
+       pitch < 80dp → 1x2/2x2 become placeable there) and exactly 1 row
+       on tall-row launchers (ceil(80/pitch) = 1 for pitch ≥ 80dp — the
+       Pixel ≈116 dp, the A52 ≈89 dp — so their offer stays 1x1 + 2x1).
+     - targetCell 1x1: the default placement size.
+     - resizeMode horizontal|vertical: the widget may be stretched across
+       columns AND down a row; the actual offer per launcher is capped by
+       the min/max ranges above (1-2 x 1 on tall-row launchers, 1-2 x
+       1-2 on short-row launchers).
+     - Content fit per size (pinned in WidgetContent.kt): the budget is the
+       tightest of the host-reported candidate allocations — API 31+
+       launchers push them into the stable widget options
+       (OPTION_APPWIDGET_SIZES, a list of px sizes; the app re-renders on
+       onAppWidgetOptionsChanged), so the span-agnostic fit is correct at
+       whatever size any launcher offers. Hosts
+       that don't report an allocation (pre-API 31, or a host that never
+       pushes sizes) fall back to the 89dp default budget. The render is
+       span-agnostic (the widget cannot read its own span from the stable
+       options API), so every layout is pinned to the tightest 1x1 cell:
+       * 1-row cell: the full layout (worst case 82dp) is kept whenever the
+         allocation holds it — every host that doesn't report an allocation
+         (A52 ≈89dp, Pixel ≈116dp, unknown) and every reporting host whose
+         1-row cell is ≥82dp; a sub-80dp allocation — the documented
+         Samsung S26 Ultra One UI short row (pitch under 80dp, pinned
+         conservatively against the 64dp tight case) — renders compact
+         (the secondary freshness line dropped; at the pinned 64dp the
+         render is at most 62dp — 3 rows without the freshness line — or
+         60dp with the "+N more" line), and even tighter allocations drop
+         grid rows into the "+N more" count until the remainder fits.
+       * 2-row cell (short-row launchers only): the allocation is
+         2×pitch ≥ 2×40dp = 80dp (the 40dp minResize floor), so the fit
+         rules yield the full layout when the allocation is ≥82dp or the
+         72dp compact worst case when it is 80-81dp — it always fits.
+     - min/maxResize (API 31+) agree with the min/max offer ranges;
+       launchers below API 31 ignore these attributes and fall back to
+       the resizeMode behaviour. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="40dp"
-    android:minHeight="80dp"
+    android:minHeight="40dp"
     android:minResizeWidth="40dp"
-    android:minResizeHeight="80dp"
+    android:minResizeHeight="40dp"
     android:maxResizeWidth="190dp"
     android:maxResizeHeight="80dp"
     android:maxWidth="190dp"
@@ -40,6 +68,6 @@
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_preview"
     android:previewLayout="@layout/widget_preview"
-    android:resizeMode="horizontal"
+    android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/widget_description" />
