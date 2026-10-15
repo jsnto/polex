@@ -302,14 +302,14 @@ class ServerWidget : GlanceAppWidget() {
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (columns == WIDGET_COLUMNS_1) {
-                                cell(rowItems.first(), columns, measure)
+                                Cell(rowItems.first(), columns, measure)
                             } else {
                                 Column(GlanceModifier.defaultWeight()) {
-                                    cell(rowItems.first(), columns, measure)
+                                    Cell(rowItems.first(), columns, measure)
                                 }
                                 if (rowItems.size > 1) {
                                     Column(GlanceModifier.defaultWeight()) {
-                                        cell(rowItems.last(), columns, measure)
+                                        Cell(rowItems.last(), columns, measure)
                                     }
                                 }
                             }
@@ -413,7 +413,7 @@ class ServerWidget : GlanceAppWidget() {
      * styled red (no `off` label at 1×1).
      */
     @Composable
-    private fun RowScope.cell(s: SrvStatus, columns: Int, measure: NameMeasurer) {
+    private fun RowScope.Cell(s: SrvStatus, columns: Int, measure: NameMeasurer) {
         val fit = widgetNameFit(s.name, columns, measure)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
