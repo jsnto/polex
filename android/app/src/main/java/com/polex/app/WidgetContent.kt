@@ -78,12 +78,13 @@ fun widgetOverflow(items: List<SrvStatus>, columns: Int): Int =
 // Short-cell vertical fit (the 1-row placement every launcher can now make
 // possible with the 40dp declared height floor — see polex_widget_info.xml).
 //
-// The budget is the height the HOST ACTUALLY ALLOCATED to the widget:
-// launchers on API 31+ push their allocation into the stable widget
-// options (`OPTION_APPWIDGET_SIZES`, a list of px sizes, delivered via
-// `updateAppWidgetOptions` / `onAppWidgetOptionsChanged`) — the budget is
-// that allocation in dp ([ServerWidget] converts px→dp), so the fit is
-// correct at whatever size any launcher offers. Hosts that don't report
+// The budget is the tightest of the HOST-REPORTED CANDIDATE allocations:
+// launchers on API 31+ push their candidate allocations into the stable
+// widget options (`OPTION_APPWIDGET_SIZES`, a list of px sizes, delivered
+// via `updateAppWidgetOptions` / `onAppWidgetOptionsChanged`) — the budget
+// is the smallest of them in dp ([ServerWidget] converts px→dp and takes
+// the minimum), so the span-agnostic fit is correct at whatever size any
+// launcher offers. Hosts that don't report
 // an allocation (pre-API 31, or a host that doesn't push sizes) fall back
 // to [WIDGET_HOST_BUDGET_DEFAULT_DP].
 // ---------------------------------------------------------------------------
@@ -152,8 +153,8 @@ const val WIDGET_HOST_BUDGET_SHORT_DP = 64
 const val WIDGET_HOST_BUDGET_DEFAULT_DP = 89
 
 /**
- * The vertical budget (dp) for a render, from the height the host actually
- * allocated to the widget ([allocatedHeightDp] — the host-reported
+ * The vertical budget (dp) for a render, from the tightest host-reported
+ * candidate allocation ([allocatedHeightDp] — the smallest reported
  * allocation in dp, see [ServerWidget]'s budget read from
  * `OPTION_APPWIDGET_SIZES`). A missing or non-positive allocation (the
  * host didn't report one) falls back to [WIDGET_HOST_BUDGET_DEFAULT_DP].
@@ -163,12 +164,13 @@ fun widgetBudgetDp(allocatedHeightDp: Int?): Int =
 
 /**
  * The vertical layout decided per render against the host's vertical
- * budget — the height the host ACTUALLY ALLOCATED to the widget
- * ([widgetBudgetDp]: the `OPTION_APPWIDGET_SIZES` allocation on API 31+
- * reporting hosts, the [WIDGET_HOST_BUDGET_DEFAULT_DP] fallback
- * otherwise). The widget can occupy exactly one row, so the whole render
- * — hero + [showFreshness] line + grid rows + overflow line — must fit the
- * budget. Rules:
+ * budget — the tightest of the host-reported candidate allocations
+ * ([widgetBudgetDp]: the smallest `OPTION_APPWIDGET_SIZES` allocation on
+ * API 31+ reporting hosts, the [WIDGET_HOST_BUDGET_DEFAULT_DP] fallback
+ * otherwise). The render is span-agnostic (the widget cannot read its own
+ * span from the stable options API), so the whole render — hero +
+ * [showFreshness] line + grid rows + overflow line — must fit that
+ * tightest candidate. Rules:
  *
  *  1. the FULL layout (the secondary freshness line kept) when it fits the
  *     budget — the historical render, unchanged on default-budget hosts;

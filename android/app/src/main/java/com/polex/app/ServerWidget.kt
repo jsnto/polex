@@ -103,12 +103,12 @@ private val DotRed = Color(0xFFF44336)
  * 64 dp tight case, see [WidgetContent]): once the 40dp declared height
  * floor makes a 1-row placement possible there, a 1-row allocation is a
  * sub-80dp row, so the full 82 dp worst case no longer fits by
- * construction. The budget is the height the host ACTUALLY allocated to
- * the widget — API 31+ launchers push it into the stable widget options
- * (`OPTION_APPWIDGET_SIZES`, a list of px sizes, delivered via
+ * construction. The budget is the tightest of the host-reported candidate
+ * allocations — API 31+ launchers push them into the stable widget
+ * options (`OPTION_APPWIDGET_SIZES`, a list of px sizes, delivered via
  * `updateAppWidgetOptions`; Glance's receiver re-renders us on
- * `onAppWidgetOptionsChanged`) — so the fit is correct at whatever size
- * any launcher offers, with no host identification needed. Hosts that
+ * `onAppWidgetOptionsChanged`) — so the span-agnostic fit is correct at
+ * whatever size any launcher offers, with no host identification needed. Hosts that
  * don't report an allocation (pre-API 31, or a host that never pushes
  * sizes) get the 89 dp default budget: the full layout always fits there,
  * so their render is unchanged by this (the historical render). Per
@@ -280,13 +280,13 @@ class ServerWidget : GlanceAppWidget() {
     }
 
     /**
-     * The vertical budget (dp) for the short-cell fit: the height the host
-     * actually allocated to this widget instance — read from the stable
-     * widget options' `OPTION_APPWIDGET_SIZES` (a list of px `SizeF` the
-     * launcher pushes via `updateAppWidgetOptions`, API 31+; the tightest
-     * reported allocation is the budget — a multi-size list covers the
-     * landscape/portrait allocations of a responsive host, and the render
-     * must fit the smallest of them). Hosts that
+     * The vertical budget (dp) for the short-cell fit: the tightest of the
+     * host-reported candidate allocations for this widget instance — read
+     * from the stable widget options' `OPTION_APPWIDGET_SIZES` (a list of
+     * px `SizeF` the launcher pushes via `updateAppWidgetOptions`, API 31+;
+     * a multi-size list carries the landscape/portrait candidate
+     * allocations of a responsive host, and the render must fit the
+     * smallest of them). Hosts that
      * don't report an allocation (pre-API 31, a host that never pushes
      * sizes, or an error reading the options) get the 89 dp default
      * budget, which always fits the full layout (82 dp worst case) and

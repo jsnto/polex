@@ -28,10 +28,11 @@
        the min/max ranges above (1-2 x 1 on tall-row launchers, 1-2 x
        1-2 on short-row launchers).
      - Content fit per size (pinned in WidgetContent.kt): the budget is the
-       height the host ACTUALLY ALLOCATES to the widget — API 31+ launchers
-       push it into the stable widget options (OPTION_APPWIDGET_SIZES, a
-       list of px sizes; the app re-renders on onAppWidgetOptionsChanged),
-       so the fit is correct at whatever size any launcher offers. Hosts
+       tightest of the host-reported candidate allocations — API 31+
+       launchers push them into the stable widget options
+       (OPTION_APPWIDGET_SIZES, a list of px sizes; the app re-renders on
+       onAppWidgetOptionsChanged), so the span-agnostic fit is correct at
+       whatever size any launcher offers. Hosts
        that don't report an allocation (pre-API 31, or a host that never
        pushes sizes) fall back to the 89dp default budget. The render is
        span-agnostic (the widget cannot read its own span from the stable

@@ -157,9 +157,10 @@ where the old 80dp floor made the picker offer only a 1×2 tile, so the
 1×1/2×1 offers were missing) while tall-row launchers (Pixel ≈116dp,
 A52 ≈89dp) stay at exactly one row; on such short rows the widget
 renders compact, dropping the secondary "updated HH:mm" line when the row
-can't hold the full layout (the budget is the height the launcher actually
-allocated to the widget, read from the stable widget options (API 31+) —
-hosts that don't report an allocation keep the unchanged full layout). It is a
+can't hold the full layout (the budget is the tightest of the candidate
+allocations the launcher reports, read from the stable widget options
+(API 31+) — hosts that don't report an allocation keep the unchanged
+full layout). It is a
 colored `N/M UP` hero with the
 data-freshness
 time under it ("updated 14:32"), then a grid of servers

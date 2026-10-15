@@ -305,10 +305,10 @@ short-row launchers (pitch <80dp, e.g. the Samsung S26 Ultra's One UI
 launcher, where the old 80dp floor made the picker offer only a 1×2 tile —
 now 1×1, 2×1, 1×2 and 2×2 are all placeable); on such short rows the
 widget renders compact, dropping the secondary "updated HH:mm" line when
-the row can't hold the full layout (the budget is the height the launcher
-actually allocated to the widget, read from the stable widget options
-(API 31+) — hosts that don't report an allocation, like the Pixel and
-A52, keep the unchanged full layout). **What it shows is configurable in
+the row can't hold the full layout (the budget is the tightest of the
+candidate allocations the launcher reports, read from the stable widget
+options (API 31+) — hosts that don't report an allocation, like the Pixel
+and A52, keep the unchanged full layout). **What it shows is configurable in
 Settings → Widget**: the grid layout (two columns = dot + name pairs, the
 default, or one column = one row per server) and which servers to show
 (multi-select over the server list, default all; removed servers are
