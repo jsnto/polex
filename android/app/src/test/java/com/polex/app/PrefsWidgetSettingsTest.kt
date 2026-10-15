@@ -72,6 +72,17 @@ class PrefsWidgetSettingsTest {
     }
 
     @Test
+    fun clearingTheSelectionRestoresTheUnsetDefault() {
+        // "All" (the settings pane) clears the stored selection: it must
+        // read back UNSET (null) — not as an empty set ("show nothing").
+        val ctx = context()
+        Prefs.setWidgetSelectedServerIds(ctx, setOf(1, 2))
+        assertEquals(setOf(1, 2), Prefs.widgetSelectedServerIds(ctx))
+        Prefs.clearWidgetSelectedServerIds(ctx)
+        assertNull("cleared selection reads back unset (null), not an empty set", Prefs.widgetSelectedServerIds(ctx))
+    }
+
+    @Test
     fun emptySelectionIsStoredAndDistinctFromUnset() {
         // "Show nothing" is a real choice (the settings screen's None),
         // and the widget must honor it (render no servers) without

@@ -85,4 +85,9 @@ object Prefs {
             .putStringSet(KEY_WIDGET_SELECTED, ids.map { it.toString() }.toSet())
             .apply()
     }
+
+    /** Removes the stored selection so it reads back unset (null) = "show all". */
+    fun clearWidgetSelectedServerIds(context: Context) {
+        prefs(context).edit().remove(KEY_WIDGET_SELECTED).apply()
+    }
 }

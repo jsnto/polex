@@ -341,12 +341,19 @@ private fun WidgetScreen(onBack: () -> Unit) {
     fun loadServers() {
         scope.launch {
             val result = Api.safe { Api.get("${Api.base(context)}/api/servers") }
-            message = if (result.code == 200) {
-                servers = parseServerArray(result.body)
-                ""
-            } else {
-                "Cannot load servers (${friendlyError(result.body)})"
+            if (result.code != 200) {
+                message = "Cannot load servers (${friendlyError(result.body)})"
+                return@launch
             }
+            runCatching { parseServerArray(result.body) }
+                .onSuccess {
+                    servers = it
+                    message = ""
+                }
+                .onFailure {
+                    servers = null
+                    message = "Cannot load servers (invalid server list)"
+                }
         }
     }
 
@@ -421,16 +428,15 @@ private fun WidgetScreen(onBack: () -> Unit) {
                             )
                         }
                         TextButton(onClick = {
-                            val all = servers?.map { it.id }?.toSet() ?: emptySet()
-                            selectedIds = all
-                            Prefs.setWidgetSelectedServerIds(context, all)
+                            selectedIds = null
+                            Prefs.clearWidgetSelectedServerIds(context)
                             applyAndRefresh()
-                        }) { Text("All") }
+                        }, enabled = servers != null) { Text("All") }
                         TextButton(onClick = {
                             selectedIds = emptySet()
                             Prefs.setWidgetSelectedServerIds(context, emptySet())
                             applyAndRefresh()
-                        }) { Text("None") }
+                        }, enabled = servers != null) { Text("None") }
                     }
                     when {
                         servers == null && message.isEmpty() -> Text(
@@ -497,12 +503,18 @@ fun ServersScreen(
     fun loadServers() {
         scope.launch {
             val result = Api.safe { Api.get("${Api.base(context)}/api/servers") }
-            message = if (result.code == 200) {
-                servers = parseServerArray(result.body)
-                ""
-            } else {
-                "Cannot load servers (${friendlyError(result.body)})"
+            if (result.code != 200) {
+                message = "Cannot load servers (${friendlyError(result.body)})"
+                return@launch
             }
+            runCatching { parseServerArray(result.body) }
+                .onSuccess {
+                    servers = it
+                    message = ""
+                }
+                .onFailure {
+                    message = "Cannot load servers (invalid server list)"
+                }
         }
     }
 

@@ -2,6 +2,7 @@ package com.polex.app
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -34,8 +35,10 @@ import org.robolectric.annotation.Config
  *  - the layout-mode switch (two-column grid, default ON) persists to
  *    [Prefs.widgetColumns] — 2 on, 1 off — and the checkbox/All/None
  *    edits persist to [Prefs.widgetSelectedServerIds]: an explicit set
- *    once the user touches anything, an empty set for "None" (a real
- *    "show nothing" choice, distinct from the unset show-all default);
+ *    once the user touches a checkbox, an empty set for "None" (a real
+ *    "show nothing" choice), and the UNSET state for "All" (the show-all
+ *    default — `null`, distinct from the empty set), while the buttons
+ *    stay disabled until the live server list has loaded;
  *  - every change triggers the immediate widget refresh path (a status
  *    fetch the stand-in records, followed by the widget re-render).
  *
@@ -73,9 +76,14 @@ class WidgetSettingsPaneTest {
           "lastWolAt":"","lastShutdownAt":""}]
     """.trimIndent()
 
+    /** /api/servers response override for the failure tests (null = 200 + [serversJson]). */
+    @Volatile
+    private var serverListResponse: Pair<Int, String>? = null
+
     @Before
     fun setUp() {
         requests.clear()
+        serverListResponse = null
         socket = ServerSocket(0, 0, InetAddress.getByName("127.0.0.1"))
         base = "http://127.0.0.1:${socket.localPort}"
         serverThread = Thread {
@@ -114,7 +122,7 @@ class WidgetSettingsPaneTest {
                 if (h.isEmpty()) break
             }
             val (code, body) = when {
-                method == "GET" && path == "/api/servers" -> 200 to serversJson
+                method == "GET" && path == "/api/servers" -> serverListResponse ?: (200 to serversJson)
                 method == "GET" && path == "/api/status" -> 200 to statusJson
                 method == "GET" && path == "/api/version" -> 200 to """{"version":"1.2"}"""
                 else -> 404 to """{"error":"unexpected: $method $path"}"""
@@ -219,13 +227,62 @@ class WidgetSettingsPaneTest {
     fun allAndNoneButtonsSetTheWholeSelection() {
         openWidgetPane()
         compose.onNodeWithText("None").performClick()
-        waitFor("None stored the empty set") {
+        waitFor("None stored the explicit empty set (show nothing)") {
             assertEquals(emptySet<Int>(), Prefs.widgetSelectedServerIds(ctx()))
         }
+        // "All" is the show-all default, not a stored snapshot of the
+        // live ids: it unsets the selection, so the widget lists every
+        // live server (including ones added later).
         compose.onNodeWithText("All").performClick()
-        waitFor("All stored every live server id") {
-            assertEquals(setOf(1, 2), Prefs.widgetSelectedServerIds(ctx()))
+        waitFor("All unset the selection (show all, the default)") {
+            assertNull(Prefs.widgetSelectedServerIds(ctx()))
         }
+    }
+
+    @Test
+    fun allAndNoneAreDisabledWhileTheServerListIsUnavailable() {
+        // Regression: with the server list failed to load, a tap on "All"
+        // persisted an EMPTY set (the "show nothing" state) — the opposite
+        // of the user's action. The buttons are gated on the loaded list,
+        // so a failed load leaves the selection unset.
+        serverListResponse = 500 to """{"error":"boom"}"""
+        compose.setContent { SettingsScreen(onBack = {}, onLogout = {}) }
+        waitFor("settings menu with the Widget entry") {
+            compose.onNodeWithText("Widget", useUnmergedTree = false).assertExists()
+        }
+        compose.onNodeWithText("Widget").performClick()
+        waitFor("the failed load surfaced as the pane's error message") {
+            compose.onNodeWithText("Cannot load servers", substring = true).assertIsDisplayed()
+        }
+        compose.onNodeWithText("All").assertIsNotEnabled()
+        compose.onNodeWithText("None").assertIsNotEnabled()
+        compose.onNodeWithText("All").performClick()
+        assertEquals(
+            "a failed load must not persist a selection",
+            null,
+            Prefs.widgetSelectedServerIds(ctx()),
+        )
+    }
+
+    @Test
+    fun aNonJsonServerListBodyShowsTheErrorStateInsteadOfCrashing() {
+        // A 200 with a non-JSON body (a foreign service at the configured
+        // URL) used to throw out of the pane's coroutine; it must surface
+        // as the pane's error state instead.
+        serverListResponse = 200 to "<html>not a server list</html>"
+        compose.setContent { SettingsScreen(onBack = {}, onLogout = {}) }
+        waitFor("settings menu with the Widget entry") {
+            compose.onNodeWithText("Widget", useUnmergedTree = false).assertExists()
+        }
+        compose.onNodeWithText("Widget").performClick()
+        waitFor("the bad 200 body surfaced as the pane's error message") {
+            compose.onNodeWithText("Cannot load servers (invalid server list)").assertIsDisplayed()
+        }
+        assertTrue(
+            "no server rows after the bad 200 body",
+            compose.onAllNodesWithText("srv-a").fetchSemanticsNodes().isEmpty(),
+        )
+        compose.onNodeWithText("All").assertIsNotEnabled()
     }
 
     @Test
