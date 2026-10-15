@@ -307,8 +307,12 @@ now 1×1, 2×1, 1×2 and 2×2 are all placeable); on such short rows the
 widget renders compact, dropping the secondary "updated HH:mm" line when
 the row can't hold the full layout (the budget is the tightest of the
 candidate allocations the launcher reports, read from the stable widget
-options (API 31+) — hosts that don't report an allocation, like the Pixel
-and A52, keep the unchanged full layout). **What it shows is configurable in
+options (API 31+); a report below the 40dp declared height floor is
+implausible — a launcher can't allocate a widget below its declared
+minimum — so it, like a missing report, falls back to the 89dp default:
+hosts that don't report an allocation, like the Pixel and A52, keep the
+unchanged full layout). The grid keeps at least one server row at every
+legal allocation; `+N more` carries only the servers beyond what fits. **What it shows is configurable in
 Settings → Widget**: the grid layout (two columns = dot + name pairs, the
 default, or one column = one row per server) and which servers to show
 (multi-select over the server list, default all; removed servers are

@@ -17,9 +17,16 @@ import org.junit.Test
  *    vertical budget — the full layout when it fits, the compact layout
  *    (secondary freshness line dropped) when it doesn't, and grid rows
  *    dropped into the overflow count when even that doesn't fit the 64 dp
- *    documented tight case (the Samsung One UI short-row host); the
+ *    documented tight case (the Samsung One UI short-row host) — with the
+ *    ROW FLOOR: at every legal allocation (≥ the 40 dp declared cell
+ *    floor) at least one server row renders, and the "+N more" line
+ *    carries only the remainder beyond what fits, never the entire list
+ *    (the S26 Ultra regression: a sub-48 dp allocation drove the pre-fix
+ *    fit to the hero-only render — zero server rows + "+N more"); the
  *    budget itself is the host-reported allocation (OPTION_APPWIDGET_SIZES,
- *    API 31+), falling back to the 89 dp default when the host reports
+ *    API 31+) with the IMPLAUSIBLE-READ GUARD (a launcher cannot allocate
+ *    below the widget's declared 40 dp floor, so a sub-floor read is
+ *    rejected) and the 89 dp default fallback when the host reports
  *    none;
  *  - server selection: `null` = all servers (the default), an explicit set
  *    = only those, in live-list order;
@@ -256,33 +263,182 @@ class WidgetContentTest {
         // host that never pushes OPTION_APPWIDGET_SIZES) → the 89dp
         // default, which always keeps the full layout (82dp worst case).
         assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(null))
-        // A degenerate non-positive allocation is treated as absent.
-        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(0))
-        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(-12))
     }
 
     @Test
-    fun everyOfferedAllocationRendersWithinBudget() {
+    fun subFloorAllocationsAreImplausibleAndFallBackToTheDefault() {
+        // The launcher cannot allocate a widget below its declared 40 dp
+        // height floor (minHeight/minResizeHeight in polex_widget_info.xml),
+        // so any read below the floor is implausible — a corrupted or
+        // misinterpreted report — and gets the 89 dp default budget
+        // instead of a degenerate fit. The degenerate non-positive reads
+        // are sub-floor too and fall back the same way.
+        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(WIDGET_CELL_FLOOR_DP - 1))
+        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(34))
+        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(0))
+        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(-12))
+        // The floor itself is LEGAL — a host that reports the widget's
+        // declared minimum as its candidate allocation is at the floor,
+        // not below it: the read is trusted, and the fit rules' row floor
+        // keeps at least one server row rendering at it.
+        assertEquals(WIDGET_CELL_FLOOR_DP, widgetBudgetDp(WIDGET_CELL_FLOOR_DP))
+        // Every legal allocation at/above the floor passes through as the
+        // budget, unchanged.
+        for (dp in WIDGET_CELL_FLOOR_DP..160) assertEquals("$dp dp", dp, widgetBudgetDp(dp))
+    }
+
+    @Test
+    fun s26CollapseAllocationPinsTheRegression() {
+        // The S26 Ultra report (the PR #15 build): the placed 1-row widget
+        // rendered only the hero row ("6/6 UP") + "+6 more" — ZERO server
+        // rows, with six servers live. Its One UI launcher reports a
+        // sub-48 dp allocation for the 1-row placement — the minimal one
+        // is the 40 dp declared floor itself (a launcher can't allocate
+        // below the widget's declared minimum, so the smallest report it
+        // can push is 40 dp): the pre-fix fit at ANY allocation below the
+        // 48 dp row-floor render dropped all three grid rows to the 36 dp
+        // hero-only shape, and the render showed the entire list as
+        // "+6 more".
+        val servers = (1..6).map { srv(it) }
+        val rows = widgetGridRows(servers, WIDGET_COLUMNS_2)
+        val hidden = widgetOverflow(servers, WIDGET_COLUMNS_2)
+        assertEquals(3, rows.size)
+        assertEquals(0, hidden)
+        // At the minimal collapsing allocation (40 dp — legal, at the
+        // declared floor, so the guard keeps it): the row floor holds —
+        // one row of two servers renders, and "+4 more" carries only the
+        // remainder beyond what fits, never the entire list.
+        val layout = widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(40))
+        assertEquals(1, layout.gridRows)
+        assertFalse(layout.showFreshness)
+        // The pinned row-floor shape: 18 + 12 + 10 + 8 = 48 dp (hero + one
+        // row + the guaranteed overflow line + padding; the 38 dp
+        // non-optional parts fit the 40 dp floor, the line prices 48 dp).
+        assertEquals(widgetLayoutHeightDp(1, false, true), layout.allocatedHeightDp)
+        val shown = rows.take(layout.gridRows).sumOf { it.size }
+        assertEquals(2, shown)
+        assertEquals(4, servers.size - shown) // "+4 more", not "+6 more"
+        // Every allocation the S26 plausibly reports — 40..47 dp, all
+        // below the 48 dp row-floor render — keeps the row floor: one row
+        // never zero. (A sub-floor read, e.g. 39 dp, is implausible: the
+        // guard rejects it to the 89 dp default, where the full layout —
+        // all three rows — renders.)
+        for (budget in 40..47) {
+            val l = widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(budget))
+            assertEquals("$budget dp must keep one row", 1, l.gridRows)
+            assertTrue("$budget dp: the overflow carries the remainder", servers.size - rows.take(l.gridRows).sumOf { it.size } < servers.size)
+        }
+        assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(39))
+        assertEquals(3, widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(39)).gridRows)
+    }
+
+    @Test
+    fun rowFloorHoldsAtEveryLegalAllocation() {
         // The offer matrix can produce exactly these allocations: a 1-row
         // cell of 40..80dp (the declared height range) or a 2-row cell of
         // 2×pitch on a short-row launcher (pitch 40..79dp → 80..158dp).
-        // Every layout decision at any of them must fit the allocation —
-        // "the content must reflow and render cleanly at EVERY offered
-        // size": no clip anywhere in the offer range, in any row/overflow
-        // shape.
+        // At EVERY allocation from the 40dp declared floor up, a non-empty
+        // grid renders at least one server row; and at every allocation ≥
+        // the 48dp row-floor shape the render fits the allocation.
         val budgets = (40..80).toSet() + (40..79).map { 2 * it }.toSet()
         for (budget in budgets) {
-            for (rows in 0..3) {
+            for (rows in 1..3) {
                 for (overflow in listOf(false, true)) {
                     val layout = widgetVerticalLayout(rows, overflow, budget)
                     assertTrue(
-                        "$rows rows / overflow=$overflow at a ${budget}dp allocation: " +
-                            "the ${layout.allocatedHeightDp}dp render exceeds the allocation",
-                        layout.allocatedHeightDp <= budget,
+                        "$budget dp / $rows rows / overflow=$overflow: the row floor renders ≥1 server row",
+                        layout.gridRows >= 1,
                     )
+                    if (budget >= 48) {
+                        assertTrue(
+                            "$budget dp: the ${layout.allocatedHeightDp}dp render exceeds the allocation",
+                            layout.allocatedHeightDp <= budget,
+                        )
+                    } else {
+                        // 40..47dp — the pinned row floor: hero + one row +
+                        // padding (38 dp, the arithmetic's non-optional
+                        // parts) always fits; a row drop prices the
+                        // guaranteed overflow line into the 48 dp shape,
+                        // at most 8 dp past the allocation (the line's
+                        // height). The one shape that needs no drop — 1 row
+                        // without overflow — stays at the 38 dp compact.
+                        assertEquals(1, layout.gridRows)
+                        val expected = if (rows == 1 && !overflow)
+                            widgetLayoutHeightDp(1, false, false)
+                        else
+                            widgetLayoutHeightDp(1, false, true)
+                        assertEquals("$budget dp", expected, layout.allocatedHeightDp)
+                    }
                 }
             }
         }
+        // The empty grid (no servers — the "no data" render) keeps fitting
+        // every allocation.
+        for (budget in 40..80) {
+            for (overflow in listOf(false, true)) {
+                val layout = widgetVerticalLayout(0, overflow, budget)
+                assertEquals(0, layout.gridRows)
+                assertTrue("$budget dp: empty render exceeds the allocation", layout.allocatedHeightDp <= budget)
+            }
+        }
+    }
+
+    @Test
+    fun sixServersTwoColumnsFitThreeRowsWithNoOverflow() {
+        // Six servers, the default 2-column mode: 3 rows of two cells —
+        // all six listed, the overflow count zero, so NO "+N more" line —
+        // in the 89dp-class 1×1 cell and in every stretched (2-row) cell.
+        val servers = (1..6).map { srv(it) }
+        val rows = widgetGridRows(servers, WIDGET_COLUMNS_2)
+        assertEquals(3, rows.size)
+        assertEquals(6, rows.sumOf { it.size })
+        assertEquals(0, widgetOverflow(servers, WIDGET_COLUMNS_2))
+        // 89 dp-class 1×1 (A52; the Pixel measures ≈116 dp — the same
+        // default-budget class): the full layout — 72 dp, freshness line
+        // kept — holds, and all three rows render.
+        for (budget in intArrayOf(89, 116)) {
+            val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
+            assertEquals("$budget dp: all six must fit as 3 rows", 3, layout.gridRows)
+            assertTrue("$budget dp: the full layout keeps the freshness line", layout.showFreshness)
+            assertEquals(widgetLayoutHeightDp(3, true, false), layout.allocatedHeightDp)
+            // No servers hidden → no "+N more" line in the render.
+            assertEquals(0, servers.size - rows.take(layout.gridRows).sumOf { it.size })
+        }
+        // Every stretched (2-row) allocation — 2×pitch, pitch 40..79dp →
+        // 80..158dp, short-row launchers: all six still fit as 3 rows
+        // with no overflow line (the 80-81dp edge drops only the
+        // secondary freshness line: the 62 dp compact worst case).
+        for (pitch in 40..79) {
+            val budget = 2 * pitch
+            val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
+            assertEquals("stretched ${budget}dp: all six must fit as 3 rows", 3, layout.gridRows)
+            assertEquals(
+                "stretched ${budget}dp: no servers hidden, no overflow line",
+                0, servers.size - rows.take(layout.gridRows).sumOf { it.size },
+            )
+            assertTrue("stretched ${budget}dp: the render fits", layout.allocatedHeightDp <= budget)
+            if (budget >= 82) assertTrue("stretched ${budget}dp: full layout kept", layout.showFreshness)
+        }
+    }
+
+    @Test
+    fun sixServersOneColumnAt1x1ListsThreePlusThreeMore() {
+        // Six servers, 1-column mode, 1×1 (89dp-class): the per-mode budget
+        // is 3 rows (one server each) → three servers listed + a "+3
+        // more" remainder — the pinned full-worst-case 82 dp render fits
+        // the 89 dp budget with the freshness line kept.
+        val servers = (1..6).map { srv(it) }
+        val rows = widgetGridRows(servers, WIDGET_COLUMNS_1)
+        assertEquals(3, rows.size)
+        assertEquals(listOf(1, 2, 3), rows.map { it.single().id })
+        assertEquals(3, widgetOverflow(servers, WIDGET_COLUMNS_1)) // "+3 more"
+        val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_1) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        assertEquals(3, layout.gridRows)
+        assertTrue(layout.showFreshness)
+        assertEquals(widgetLayoutHeightDp(3, true, true), layout.allocatedHeightDp)
+        // The remainder beyond what fits — exactly three, the rest of the
+        // list — never the entire list.
+        assertEquals(3, servers.size - rows.take(layout.gridRows).sumOf { it.size })
     }
 
     @Test

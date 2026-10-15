@@ -34,7 +34,12 @@
        onAppWidgetOptionsChanged), so the span-agnostic fit is correct at
        whatever size any launcher offers. Hosts
        that don't report an allocation (pre-API 31, or a host that never
-       pushes sizes) fall back to the 89dp default budget. The render is
+       pushes sizes) fall back to the 89dp default budget — as do
+       implausible reads below the 40dp declared height floor: a launcher
+       cannot allocate a widget below its declared minimum, so a sub-floor
+       report is rejected rather than trusted (the S26 Ultra collapse: a
+       sub-48dp allocation drove the pre-guard fit to the hero-only render
+       — "N/M UP" + "+N more" with zero server rows). The render is
        span-agnostic (the widget cannot read its own span from the stable
        options API), so every layout is pinned to the tightest 1x1 cell:
        * 1-row cell: the full layout (worst case 82dp) is kept whenever the
@@ -46,7 +51,13 @@
          (the secondary freshness line dropped; at the pinned 64dp the
          render is at most 62dp — 3 rows without the freshness line — or
          60dp with the "+N more" line), and even tighter allocations drop
-         grid rows into the "+N more" count until the remainder fits.
+         grid rows into the "+N more" count until the remainder fits — but
+         never past the row floor: at every allocation ≥ the 40dp declared
+         floor at least one server row renders (the row-floor render is
+         18+12+10+8 = 48dp — hero + one row + the guaranteed overflow line
+         + padding — so a 40..47dp allocation is exceeded by at most 8dp,
+         the line's height); the hero-only render remains only as the
+         unreachable last resort below the declared floor.
        * 2-row cell (short-row launchers only): the allocation is
          2×pitch ≥ 2×40dp = 80dp (the 40dp minResize floor), so the fit
          rules yield the full layout when the allocation is ≥82dp or the

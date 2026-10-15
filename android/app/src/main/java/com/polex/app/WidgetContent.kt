@@ -86,7 +86,12 @@ fun widgetOverflow(items: List<SrvStatus>, columns: Int): Int =
 // the minimum), so the span-agnostic fit is correct at whatever size any
 // launcher offers. Hosts that don't report
 // an allocation (pre-API 31, or a host that doesn't push sizes) fall back
-// to [WIDGET_HOST_BUDGET_DEFAULT_DP].
+// to [WIDGET_HOST_BUDGET_DEFAULT_DP] — as do implausible reads below the
+// widget's declared 40dp height floor ([WIDGET_CELL_FLOOR_DP]): a launcher
+// cannot allocate a widget below its declared minimum, so a sub-floor read
+// is rejected rather than trusted (the S26 Ultra collapse: a sub-48dp
+// allocation drove the pre-guard fit to the hero-only render — "N/M UP" +
+// "+N more" with zero server rows).
 // ---------------------------------------------------------------------------
 
 /** Hero row ("N/M UP") allocated height, dp — shared by the render and the budget checks below. */
@@ -105,6 +110,14 @@ const val WIDGET_OVERFLOW_HEIGHT_DP = 10
 const val WIDGET_VERTICAL_PADDING_DP = 8
 
 /**
+ * The widget's DECLARED height floor, dp (`minHeight` / `minResizeHeight` in
+ * `res/xml/polex_widget_info.xml`): a launcher cannot allocate a widget
+ * below its declared minimum, so any reported allocation below this floor
+ * is implausible — [widgetBudgetDp] rejects it (89 dp default budget).
+ */
+const val WIDGET_CELL_FLOOR_DP = 40
+
+/**
  * Allocated height (dp) of a render with [gridRows] server-grid rows, the
  * optional secondary [freshness] line, and the optional [overflow] line —
  * the pinned arithmetic the budgets below are checked against:
@@ -113,6 +126,11 @@ const val WIDGET_VERTICAL_PADDING_DP = 8
  *
  * The worst case (3 rows, freshness, overflow) is 82 dp — the same figure
  * the 1×1 budgets above are pinned to against the 89 dp default budget.
+ *
+ * The row floor (see [widgetVerticalLayout]): at the 40 dp declared cell
+ * floor the non-optional parts — 18 + 12 × 1 + 8 = 38 dp — always fit, so
+ * one server row renders at every legal allocation; the guaranteed
+ * "+N more" line a row drop makes render prices the 48 dp row-floor shape.
  */
 fun widgetLayoutHeightDp(gridRows: Int, freshness: Boolean, overflow: Boolean): Int =
     WIDGET_HERO_HEIGHT_DP +
@@ -156,11 +174,18 @@ const val WIDGET_HOST_BUDGET_DEFAULT_DP = 89
  * The vertical budget (dp) for a render, from the tightest host-reported
  * candidate allocation ([allocatedHeightDp] — the smallest reported
  * allocation in dp, see [ServerWidget]'s budget read from
- * `OPTION_APPWIDGET_SIZES`). A missing or non-positive allocation (the
- * host didn't report one) falls back to [WIDGET_HOST_BUDGET_DEFAULT_DP].
+ * `OPTION_APPWIDGET_SIZES`). A missing allocation (the host didn't report
+ * one) falls back to [WIDGET_HOST_BUDGET_DEFAULT_DP]; so does any
+ * allocation BELOW the widget's declared 40 dp height floor
+ * ([WIDGET_CELL_FLOOR_DP]) — the implausible-read guard: a launcher cannot
+ * allocate a widget below its declared minimum, so a sub-floor read is
+ * rejected rather than trusted. (A host that reports the 40 dp declared
+ * minimum itself as its candidate allocation is at the floor, not below
+ * it: the 40 dp read is legal and the fit rules' row floor —
+ * [widgetVerticalLayout] — keeps at least one server row rendering at it.)
  */
 fun widgetBudgetDp(allocatedHeightDp: Int?): Int =
-    allocatedHeightDp?.takeIf { it > 0 } ?: WIDGET_HOST_BUDGET_DEFAULT_DP
+    allocatedHeightDp?.takeIf { it >= WIDGET_CELL_FLOOR_DP } ?: WIDGET_HOST_BUDGET_DEFAULT_DP
 
 /**
  * The vertical layout decided per render against the host's vertical
@@ -180,14 +205,28 @@ fun widgetBudgetDp(allocatedHeightDp: Int?): Int =
  *  3. if that still does not fit the budget, grid rows drop from the bottom
  *     until the remainder fits — the dropped servers join the "+N more"
  *     count, so no server is silently lost (the app shows the full list).
+ *     The row drop NEVER passes the ROW FLOOR: at every legal budget (≥
+ *     [WIDGET_CELL_FLOOR_DP] — [widgetBudgetDp] guards the read, so a live
+ *     render always lands here) at least one server row renders; the
+ *     "+N more" line may carry the remainder beyond what fits, never the
+ *     entire list. The row-floor render prices the pinned arithmetic's
+ *     non-optional parts — 18 + 12 × 1 + 8 = 38 dp (hero + one row +
+ *     padding), which always fits the 40 dp floor — plus the guaranteed
+ *     "+N more" line a row drop makes render (48 dp), so a 40..47 dp
+ *     allocation is exceeded by at most 8 dp (the line's height) — the
+ *     pinned "one row at the 40 dp floor". The hero-only render (0 rows)
+ *     remains only as the unreachable last resort BELOW the declared
+ *     floor, where the pre-guard arithmetic is kept as-is.
  *
  * [desiredGridRows] is the row count after the per-mode [widgetMaxCells]
  * budget (at most 3); [overflow] is whether the "+N more" line is present
- * at all (more servers than the budget shows). The returned layout is
- * guaranteed ≤ [budgetDp] whenever the budget holds at least 36 dp (hero
- * + the overflow line + padding — the row-drop branch's floor, since the
- * line always renders once rows drop — below any launcher row pitch
- * ≥ 40 dp, the AOSP-safe floor).
+ * at all (more servers than the budget shows). The returned layout is ≤
+ * [budgetDp] whenever the budget holds at least 48 dp (hero + one row +
+ * the overflow line + padding — the row-floor render, since the line
+ * always renders once rows drop); at a 40..47 dp allocation the row floor
+ * renders the 48 dp shape (≤8 dp past the allocation); below the 40 dp
+ * declared floor (unreachable after [widgetBudgetDp]'s guard) the
+ * hero-only render is the last resort, ≤ 36 dp.
  */
 data class WidgetVerticalLayout(
     /** Server-grid rows to render (≤ [desiredGridRows]). */
@@ -204,7 +243,13 @@ fun widgetVerticalLayout(desiredGridRows: Int, overflow: Boolean, budgetDp: Int)
     if (full <= budgetDp) return WidgetVerticalLayout(desiredGridRows, true, full)
     val compact = widgetLayoutHeightDp(desiredGridRows, freshness = false, overflow = overflow)
     if (compact <= budgetDp) return WidgetVerticalLayout(desiredGridRows, false, compact)
+    // Row floor: at every legal budget (≥ the 40 dp declared cell floor,
+    // [widgetBudgetDp] rejects sub-floor reads) at least one server row
+    // renders — the "+N more" line carries the remainder, never the
+    // entire list. Below the floor (unreachable on a live render) the
+    // hero-only render remains the last resort, as before.
+    val floorRows = if (desiredGridRows > 0 && budgetDp >= WIDGET_CELL_FLOOR_DP) 1 else 0
     var rows = desiredGridRows
-    while (rows > 0 && widgetLayoutHeightDp(rows, freshness = false, overflow = true) > budgetDp) rows--
+    while (rows > floorRows && widgetLayoutHeightDp(rows, freshness = false, overflow = true) > budgetDp) rows--
     return WidgetVerticalLayout(rows, false, widgetLayoutHeightDp(rows, freshness = false, overflow = true))
 }

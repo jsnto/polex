@@ -111,12 +111,20 @@ private val DotRed = Color(0xFFF44336)
  * whatever size any launcher offers, with no host identification needed. Hosts that
  * don't report an allocation (pre-API 31, or a host that never pushes
  * sizes) get the 89 dp default budget: the full layout always fits there,
- * so their render is unchanged by this (the historical render). Per
- * render, [widgetVerticalLayout] fits the layout into the budget: the FULL
- * layout is kept when it fits; otherwise the COMPACT layout drops the
- * secondary freshness line (the hero verdict and the server grid carry the
- * state); if that still doesn't fit, grid rows drop from the bottom into
- * the "+N more" count.
+ * so their render is unchanged by this (the historical render) — as do
+ * implausible reads below the widget's declared 40 dp height floor (a
+ * launcher cannot allocate a widget below its declared minimum, so a
+ * sub-floor report is rejected rather than trusted — the S26 Ultra
+ * collapse: a sub-48 dp allocation drove the fit to the hero-only render,
+ * "N/M UP" + "+N more" with zero server rows). Per render,
+ * [widgetVerticalLayout] fits the layout into the budget: the FULL layout
+ * is kept when it fits; otherwise the COMPACT layout drops the secondary
+ * freshness line (the hero verdict and the server grid carry the state);
+ * if that still doesn't fit, grid rows drop from the bottom into the
+ * "+N more" count — but never past the row floor: at every legal
+ * allocation (≥ the 40 dp declared floor) at least one server row
+ * renders, and the "+N more" line carries the remainder, never the
+ * entire list.
  *
  * The fit is span-agnostic: the widget cannot read its own span from the
  * stable options API (only the cell position), so the layout is pinned to
@@ -290,8 +298,11 @@ class ServerWidget : GlanceAppWidget() {
      * don't report an allocation (pre-API 31, a host that never pushes
      * sizes, or an error reading the options) get the 89 dp default
      * budget, which always fits the full layout (82 dp worst case) and
-     * keeps the historical render. See WidgetContent.kt for the budgets
-     * and the pinned arithmetic.
+     * keeps the historical render — as do sub-floor reads: [widgetBudgetDp]
+     * rejects any allocation below the widget's declared 40 dp height floor
+     * as implausible (a launcher cannot allocate a widget below its
+     * declared minimum). See WidgetContent.kt for the budgets and the
+     * pinned arithmetic.
      */
     // `AppWidgetId` is the only `GlanceId` a `GlanceAppWidget` receives, but
     // it is `@RestrictTo(LIBRARY_GROUP)` in Glance 1.1.0 and there is no
