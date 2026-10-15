@@ -283,9 +283,10 @@ class ServerWidget : GlanceAppWidget() {
      * The vertical budget (dp) for the short-cell fit: the height the host
      * actually allocated to this widget instance — read from the stable
      * widget options' `OPTION_APPWIDGET_SIZES` (a list of px `SizeF` the
-     * launcher pushes via `updateAppWidgetOptions`, API 31+; the tallest
+     * launcher pushes via `updateAppWidgetOptions`, API 31+; the tightest
      * reported allocation is the budget — a multi-size list covers the
-     * landscape/portrait allocations of a responsive host). Hosts that
+     * landscape/portrait allocations of a responsive host, and the render
+     * must fit the smallest of them). Hosts that
      * don't report an allocation (pre-API 31, a host that never pushes
      * sizes, or an error reading the options) get the 89 dp default
      * budget, which always fits the full layout (82 dp worst case) and
@@ -301,10 +302,10 @@ class ServerWidget : GlanceAppWidget() {
             val sizes = AppWidgetManager.getInstance(context)
                 .getAppWidgetOptions(id)
                 .getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
-            val maxPx = sizes?.filter { it.height > 0f }?.maxOfOrNull { it.height }
+            val minPx = sizes?.filter { it.height > 0f }?.minOfOrNull { it.height }
                 ?: return WIDGET_HOST_BUDGET_DEFAULT_DP
             val density = context.resources.displayMetrics.density
-            widgetBudgetDp((maxPx / density).roundToInt())
+            widgetBudgetDp((minPx / density).roundToInt())
         } catch (e: Exception) {
             WIDGET_HOST_BUDGET_DEFAULT_DP
         }

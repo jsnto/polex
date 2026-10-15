@@ -10,7 +10,9 @@ package com.polex.app
  * [ServerWidget] applies them at render time for every offered placement
  * (1×1/2×1 everywhere, plus 1×2/2×2 on short-row launchers — the widget
  * cannot read its own span from the stable options API, so every rule
- * here must hold at the tightest size — a 1×1 cell): *  - 2 columns (the default look) = dot + name pairs, two cells per row;
+ * here must hold at the tightest size — a 1×1 cell):
+ *
+ *  - 2 columns (the default look) = dot + name pairs, two cells per row;
  *  - 1 column = one row per server;
  *  - server selection: `null` = all servers (the default), otherwise only
  *    the selected ids — a stale id (a server removed since) is dropped
