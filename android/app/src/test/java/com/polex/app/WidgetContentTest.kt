@@ -115,7 +115,7 @@ class WidgetContentTest {
      * is the worst case the fit rules are checked against in the tests
      * and the `polex_widget_info.xml` metadata comment.
      */
-    private const val WIDGET_HOST_BUDGET_SHORT_DP = 64
+    private val WIDGET_HOST_BUDGET_SHORT_DP = 64
 
     /** The uniform 12dp per-row heights ([WIDGET_GRID_ROW_HEIGHT_DP] per row). */
     private fun uniformRows(gridRows: Int): List<Int> = List(gridRows) { WIDGET_GRID_ROW_HEIGHT_DP }
