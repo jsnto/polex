@@ -107,6 +107,19 @@ class WidgetContentTest {
     /** A default-glyph render at a 1.3× system font scale (0.6 × 1.3 = 0.78em advance). */
     private val fontScale13Measure: NameMeasurer = wordPackMeasure(60, scale = 1.3)
 
+    /**
+     * The documented TIGHT short-row case, dp — the Samsung S26 Ultra's
+     * One UI launcher row pitch (under 80 dp), pinned conservatively
+     * against the 64 dp tightest documented short row. The production
+     * budget is the host-reported allocation ([widgetBudgetDp]); this pin
+     * is the worst case the fit rules are checked against in the tests
+     * and the `polex_widget_info.xml` metadata comment.
+     */
+    private val WIDGET_HOST_BUDGET_SHORT_DP = 64
+
+    /** The uniform 12dp per-row heights ([WIDGET_GRID_ROW_HEIGHT_DP] per row). */
+    private fun uniformRows(gridRows: Int): List<Int> = List(gridRows) { WIDGET_GRID_ROW_HEIGHT_DP }
+
     // --- column modes ---
 
     @Test
@@ -140,7 +153,7 @@ class WidgetContentTest {
         for (columns in listOf(WIDGET_COLUMNS_1, WIDGET_COLUMNS_2)) {
             val budget = widgetMaxCells(columns)
             val rows = (budget + columns - 1) / columns
-            val worstCaseDp = widgetLayoutHeightDp(rows, freshness = true, overflow = true)
+            val worstCaseDp = widgetLayoutHeightDp(uniformRows(rows), freshness = true, overflow = true)
             assertTrue(
                 "$columns-column worst case $worstCaseDp dp exceeds the $WIDGET_HOST_BUDGET_DEFAULT_DP dp default budget",
                 worstCaseDp <= WIDGET_HOST_BUDGET_DEFAULT_DP,
@@ -194,14 +207,15 @@ class WidgetContentTest {
 
     @Test
     fun layoutHeightArithmeticIsPinnedPerComponent() {
-        // 18 hero + [10 freshness] + 12/row + [10 overflow] + 8 padding.
-        assertEquals(82, widgetLayoutHeightDp(3, true, true))  // full worst case
-        assertEquals(72, widgetLayoutHeightDp(3, false, true)) // compact worst case
-        assertEquals(62, widgetLayoutHeightDp(3, false, false))
-        assertEquals(50, widgetLayoutHeightDp(2, false, false))
-        assertEquals(48, widgetLayoutHeightDp(1, true, false))
-        assertEquals(58, widgetLayoutHeightDp(1, true, true))
-        assertEquals(26, widgetLayoutHeightDp(0, false, false)) // hero + padding only
+        // 18 hero + [10 freshness] + 12/row + [10 overflow] + 8 padding
+        // (uniform 12dp rows).
+        assertEquals(82, widgetLayoutHeightDp(uniformRows(3), true, true))  // full worst case
+        assertEquals(72, widgetLayoutHeightDp(uniformRows(3), false, true)) // compact worst case
+        assertEquals(62, widgetLayoutHeightDp(uniformRows(3), false, false))
+        assertEquals(50, widgetLayoutHeightDp(uniformRows(2), false, false))
+        assertEquals(48, widgetLayoutHeightDp(uniformRows(1), true, false))
+        assertEquals(58, widgetLayoutHeightDp(uniformRows(1), true, true))
+        assertEquals(26, widgetLayoutHeightDp(uniformRows(0), false, false)) // hero + padding only
         // The per-row-height form prices wrapped rows the same way
         // (18 + [10] + Σrows + [10] + 8): the six-server live-inventory
         // shape (18/12/18 — two wrapped rows) is 84dp full / 74dp compact,
@@ -209,10 +223,10 @@ class WidgetContentTest {
         assertEquals(84, widgetLayoutHeightDp(listOf(18, 12, 18), true, false))
         assertEquals(74, widgetLayoutHeightDp(listOf(18, 12, 18), false, false))
         assertEquals(54, widgetLayoutHeightDp(listOf(18), false, true))
-        // The Int form is the uniform 12dp special case (delegation).
+        // uniformRows is the uniform 12dp per-row form (12 × rows).
         assertEquals(
             widgetLayoutHeightDp(listOf(12, 12, 12), true, true),
-            widgetLayoutHeightDp(3, true, true),
+            widgetLayoutHeightDp(uniformRows(3), true, true),
         )
     }
 
@@ -442,12 +456,13 @@ class WidgetContentTest {
         val columns = WIDGET_COLUMNS_2
         val rows = widgetGridRows(live, columns)
         assertEquals(3, rows.size)
-        assertEquals(listOf(18, 12, 18), widgetRowHeightsDp(live, columns, 1f, modelMeasure))
+        val rowHeights = widgetRowHeightsDp(rows, columns, 1f, modelMeasure)
+        assertEquals(listOf(18, 12, 18), rowHeights)
         assertEquals(0, widgetOverflow(live, columns)) // all six fit the 6-cell budget
         // 89dp-class 1×1: the full layout (84dp — the two wrapped rows
         // price 18dp each instead of 12dp) fits: all six listed, no
         // overflow line, freshness kept.
-        val layout = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        val layout = widgetVerticalLayout(rowHeights, widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(3, layout.gridRows)
         assertTrue(layout.showFreshness)
         assertEquals(84, layout.allocatedHeightDp)
@@ -457,24 +472,24 @@ class WidgetContentTest {
         // the 74dp compact (freshness drops, the rows stay).
         for (pitch in 40..79) {
             val budget = 2 * pitch
-            val l = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), false, budget)
+            val l = widgetVerticalLayout(rowHeights, false, budget)
             assertEquals("$budget dp: all six list as 3 rows", 3, l.gridRows)
             assertEquals(0, live.size - rows.take(l.gridRows).sumOf { it.size })
         }
         // 1×1 at the 40dp floor: the row floor holds — one row renders
         // (the wrapped 18dp first row), "+4 more" carries the remainder.
-        val floor = widgetVerticalLayout(widgetRowHeightsDp(live, columns, 1f, modelMeasure), false, WIDGET_CELL_FLOOR_DP)
+        val floor = widgetVerticalLayout(rowHeights, false, WIDGET_CELL_FLOOR_DP)
         assertEquals(1, floor.gridRows)
         assertEquals(4, live.size - rows.take(floor.gridRows).sumOf { it.size })
         // 1 column, 1×1 (89dp-class): the live names all fit one line at
         // the 10 sp base (12dp rows) — three listed + a "+3 more".
-        val oneColHeights = widgetRowHeightsDp(live, WIDGET_COLUMNS_1, 1f, modelMeasure)
+        val oneColHeights = widgetRowHeightsDp(widgetGridRows(live, WIDGET_COLUMNS_1), WIDGET_COLUMNS_1, 1f, modelMeasure)
         assertEquals(listOf(12, 12, 12), oneColHeights)
         assertEquals(3, widgetOverflow(live, WIDGET_COLUMNS_1))
         val oneCol = widgetVerticalLayout(oneColHeights, true, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(3, oneCol.gridRows)
         assertTrue(oneCol.showFreshness)
-        assertEquals(widgetLayoutHeightDp(3, true, true), oneCol.allocatedHeightDp) // 82dp
+        assertEquals(widgetLayoutHeightDp(uniformRows(3), true, true), oneCol.allocatedHeightDp) // 82dp
         // The same inventory at the 1.3× font scale: the rendered size
         // carries the scale (7.8dp for the 6 sp floor — 5 chars per line
         // at the 27dp budget; 5.46dp for the 7 sp dev200/dev400 — 4), so
@@ -484,7 +499,7 @@ class WidgetContentTest {
         // 1.5 × 2 × 7 × 1.3 = 27.3 → 28): the 89dp default host drops
         // one row into the "+N more" count (88dp = 18 + 24 + 28 + 10 + 8)
         // instead of clipping the line boxes.
-        val scaleHeights = widgetRowHeightsDp(live, columns, 1.3f, fontScale13Measure)
+        val scaleHeights = widgetRowHeightsDp(rows, columns, 1.3f, fontScale13Measure)
         assertEquals(listOf(24, 28, 24), scaleHeights)
         val scaleLayout = widgetVerticalLayout(scaleHeights, widgetOverflow(live, columns) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(2, scaleLayout.gridRows)
@@ -501,10 +516,10 @@ class WidgetContentTest {
         // 7 Pro (≈116 dp cells), the A52 and every unknown host.
         for (rows in 0..3) {
             for (overflow in listOf(false, true)) {
-                val layout = widgetVerticalLayout(rows, overflow, WIDGET_HOST_BUDGET_DEFAULT_DP)
+                val layout = widgetVerticalLayout(uniformRows(rows), overflow, WIDGET_HOST_BUDGET_DEFAULT_DP)
                 assertEquals(rows, layout.gridRows)
                 assertTrue(layout.showFreshness)
-                assertEquals(widgetLayoutHeightDp(rows, true, overflow), layout.allocatedHeightDp)
+                assertEquals(widgetLayoutHeightDp(uniformRows(rows), true, overflow), layout.allocatedHeightDp)
             }
         }
     }
@@ -513,22 +528,22 @@ class WidgetContentTest {
     fun shortBudgetKeepsTheFreshnessLineOnlyWhenTheFullLayoutFits() {
         // 64 dp tight case: 1 row full (48 dp, 58 with overflow) fits —
         // small widgets keep the freshness line on the short host too.
-        val one = widgetVerticalLayout(1, false, WIDGET_HOST_BUDGET_SHORT_DP)
+        val one = widgetVerticalLayout(uniformRows(1), false, WIDGET_HOST_BUDGET_SHORT_DP)
         assertTrue(one.showFreshness)
         assertEquals(1, one.gridRows)
         assertEquals(48, one.allocatedHeightDp)
-        val oneMore = widgetVerticalLayout(1, true, WIDGET_HOST_BUDGET_SHORT_DP)
+        val oneMore = widgetVerticalLayout(uniformRows(1), true, WIDGET_HOST_BUDGET_SHORT_DP)
         assertTrue(oneMore.showFreshness)
         assertEquals(58, oneMore.allocatedHeightDp)
         // 2 rows full = 60 dp ≤ 64 → the full layout (freshness kept) is
         // kept even at the 64 dp tight row.
-        val two = widgetVerticalLayout(2, false, WIDGET_HOST_BUDGET_SHORT_DP)
+        val two = widgetVerticalLayout(uniformRows(2), false, WIDGET_HOST_BUDGET_SHORT_DP)
         assertTrue(two.showFreshness)
         assertEquals(2, two.gridRows)
         assertEquals(60, two.allocatedHeightDp)
         // 2 rows + overflow full = 70 dp > 64 → compact: 60 dp (the
         // secondary line drops, the rows stay).
-        val twoMore = widgetVerticalLayout(2, true, WIDGET_HOST_BUDGET_SHORT_DP)
+        val twoMore = widgetVerticalLayout(uniformRows(2), true, WIDGET_HOST_BUDGET_SHORT_DP)
         assertFalse(twoMore.showFreshness)
         assertEquals(2, twoMore.gridRows)
         assertEquals(60, twoMore.allocatedHeightDp)
@@ -540,13 +555,13 @@ class WidgetContentTest {
         // rows, no freshness, 60 dp. The dropped servers join the "+N
         // more" count at render time (hidden = items - shown cells), so no
         // server is silently lost.
-        val layout = widgetVerticalLayout(3, true, WIDGET_HOST_BUDGET_SHORT_DP)
+        val layout = widgetVerticalLayout(uniformRows(3), true, WIDGET_HOST_BUDGET_SHORT_DP)
         assertEquals(2, layout.gridRows)
         assertFalse(layout.showFreshness)
         assertEquals(60, layout.allocatedHeightDp)
         // 3 rows WITHOUT overflow: compact 62 dp fits → the rows are kept
         // and only the secondary freshness line drops.
-        val noOverflow = widgetVerticalLayout(3, false, WIDGET_HOST_BUDGET_SHORT_DP)
+        val noOverflow = widgetVerticalLayout(uniformRows(3), false, WIDGET_HOST_BUDGET_SHORT_DP)
         assertEquals(3, noOverflow.gridRows)
         assertFalse(noOverflow.showFreshness)
         assertEquals(62, noOverflow.allocatedHeightDp)
@@ -558,17 +573,17 @@ class WidgetContentTest {
         // POST-fit count even when the pre-fit overflow flag was false (6
         // servers, 2 columns: 3 rows fill the 6-cell budget → no pre-fit
         // overflow) — the decision must price that line.
-        val layout = widgetVerticalLayout(3, false, 50)
+        val layout = widgetVerticalLayout(uniformRows(3), false, 50)
         assertEquals(1, layout.gridRows)
         assertFalse(layout.showFreshness)
         // The guaranteed overflow line is priced into the returned height:
         // 48 dp = hero + 1 row + overflow line + padding, not the 50 dp
         // unpriced shape (whose render would add a 10dp line the decision
         // never priced, clipping the allocation).
-        assertEquals(widgetLayoutHeightDp(1, false, true), layout.allocatedHeightDp)
+        assertEquals(widgetLayoutHeightDp(uniformRows(1), false, true), layout.allocatedHeightDp)
         // Same invariant at a 56 dp allocation (short-row host):
         // 1 row + overflow line = 48 dp ≤ 56.
-        val taller = widgetVerticalLayout(3, false, 56)
+        val taller = widgetVerticalLayout(uniformRows(3), false, 56)
         assertEquals(1, taller.gridRows)
         assertFalse(taller.showFreshness)
         assertEquals(48, taller.allocatedHeightDp)
@@ -579,7 +594,7 @@ class WidgetContentTest {
         // Every shape at the 64 dp tight case fits the budget.
         for (rows in 0..3) {
             for (overflow in listOf(false, true)) {
-                val layout = widgetVerticalLayout(rows, overflow, WIDGET_HOST_BUDGET_SHORT_DP)
+                val layout = widgetVerticalLayout(uniformRows(rows), overflow, WIDGET_HOST_BUDGET_SHORT_DP)
                 assertTrue(
                     "$rows rows/$overflow overflow exceeds the budget",
                     layout.allocatedHeightDp <= WIDGET_HOST_BUDGET_SHORT_DP,
@@ -589,7 +604,7 @@ class WidgetContentTest {
         // A degenerate 36 dp budget (below any real row pitch — the AOSP-
         // safe 40dp floor) degrades to the hero-only render, never above
         // the budget.
-        val tiny = widgetVerticalLayout(3, true, 36)
+        val tiny = widgetVerticalLayout(uniformRows(3), true, 36)
         assertEquals(0, tiny.gridRows)
         assertEquals(36, tiny.allocatedHeightDp)
     }
@@ -650,13 +665,13 @@ class WidgetContentTest {
         // declared floor, so the guard keeps it): the row floor holds —
         // one row of two servers renders, and "+4 more" carries only the
         // remainder beyond what fits, never the entire list.
-        val layout = widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(40))
+        val layout = widgetVerticalLayout(uniformRows(rows.size), hidden > 0, widgetBudgetDp(40))
         assertEquals(1, layout.gridRows)
         assertFalse(layout.showFreshness)
         // The pinned row-floor shape: 18 + 12 + 10 + 8 = 48 dp (hero + one
         // row + the guaranteed overflow line + padding; the 38 dp
         // non-optional parts fit the 40 dp floor, the line prices 48 dp).
-        assertEquals(widgetLayoutHeightDp(1, false, true), layout.allocatedHeightDp)
+        assertEquals(widgetLayoutHeightDp(uniformRows(1), false, true), layout.allocatedHeightDp)
         val shown = rows.take(layout.gridRows).sumOf { it.size }
         assertEquals(2, shown)
         assertEquals(4, servers.size - shown) // "+4 more", not "+6 more"
@@ -666,12 +681,12 @@ class WidgetContentTest {
         // guard rejects it to the 89 dp default, where the full layout —
         // all three rows — renders.)
         for (budget in 40..47) {
-            val l = widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(budget))
+            val l = widgetVerticalLayout(uniformRows(rows.size), hidden > 0, widgetBudgetDp(budget))
             assertEquals("$budget dp must keep one row", 1, l.gridRows)
             assertTrue("$budget dp: the overflow carries the remainder", servers.size - rows.take(l.gridRows).sumOf { it.size } < servers.size)
         }
         assertEquals(WIDGET_HOST_BUDGET_DEFAULT_DP, widgetBudgetDp(39))
-        assertEquals(3, widgetVerticalLayout(rows.size, hidden > 0, widgetBudgetDp(39)).gridRows)
+        assertEquals(3, widgetVerticalLayout(uniformRows(rows.size), hidden > 0, widgetBudgetDp(39)).gridRows)
     }
 
     @Test
@@ -686,7 +701,7 @@ class WidgetContentTest {
         for (budget in budgets) {
             for (rows in 1..3) {
                 for (overflow in listOf(false, true)) {
-                    val layout = widgetVerticalLayout(rows, overflow, budget)
+                    val layout = widgetVerticalLayout(uniformRows(rows), overflow, budget)
                     assertTrue(
                         "$budget dp / $rows rows / overflow=$overflow: the row floor renders ≥1 server row",
                         layout.gridRows >= 1,
@@ -706,9 +721,9 @@ class WidgetContentTest {
                         // without overflow — stays at the 38 dp compact.
                         assertEquals(1, layout.gridRows)
                         val expected = if (rows == 1 && !overflow)
-                            widgetLayoutHeightDp(1, false, false)
+                            widgetLayoutHeightDp(uniformRows(1), false, false)
                         else
-                            widgetLayoutHeightDp(1, false, true)
+                            widgetLayoutHeightDp(uniformRows(1), false, true)
                         assertEquals("$budget dp", expected, layout.allocatedHeightDp)
                     }
                 }
@@ -718,7 +733,7 @@ class WidgetContentTest {
         // every allocation.
         for (budget in 40..80) {
             for (overflow in listOf(false, true)) {
-                val layout = widgetVerticalLayout(0, overflow, budget)
+                val layout = widgetVerticalLayout(uniformRows(0), overflow, budget)
                 assertEquals(0, layout.gridRows)
                 assertTrue("$budget dp: empty render exceeds the allocation", layout.allocatedHeightDp <= budget)
             }
@@ -739,10 +754,10 @@ class WidgetContentTest {
         // default-budget class): the full layout — 72 dp, freshness line
         // kept — holds, and all three rows render.
         for (budget in intArrayOf(89, 116)) {
-            val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
+            val layout = widgetVerticalLayout(uniformRows(rows.size), widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
             assertEquals("$budget dp: all six must fit as 3 rows", 3, layout.gridRows)
             assertTrue("$budget dp: the full layout keeps the freshness line", layout.showFreshness)
-            assertEquals(widgetLayoutHeightDp(3, true, false), layout.allocatedHeightDp)
+            assertEquals(widgetLayoutHeightDp(uniformRows(3), true, false), layout.allocatedHeightDp)
             // No servers hidden → no "+N more" line in the render.
             assertEquals(0, servers.size - rows.take(layout.gridRows).sumOf { it.size })
         }
@@ -752,7 +767,7 @@ class WidgetContentTest {
         // secondary freshness line: the 62 dp compact worst case).
         for (pitch in 40..79) {
             val budget = 2 * pitch
-            val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
+            val layout = widgetVerticalLayout(uniformRows(rows.size), widgetOverflow(servers, WIDGET_COLUMNS_2) > 0, budget)
             assertEquals("stretched ${budget}dp: all six must fit as 3 rows", 3, layout.gridRows)
             assertEquals(
                 "stretched ${budget}dp: no servers hidden, no overflow line",
@@ -774,10 +789,10 @@ class WidgetContentTest {
         assertEquals(3, rows.size)
         assertEquals(listOf(1, 2, 3), rows.map { it.single().id })
         assertEquals(3, widgetOverflow(servers, WIDGET_COLUMNS_1)) // "+3 more"
-        val layout = widgetVerticalLayout(rows.size, widgetOverflow(servers, WIDGET_COLUMNS_1) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
+        val layout = widgetVerticalLayout(uniformRows(rows.size), widgetOverflow(servers, WIDGET_COLUMNS_1) > 0, WIDGET_HOST_BUDGET_DEFAULT_DP)
         assertEquals(3, layout.gridRows)
         assertTrue(layout.showFreshness)
-        assertEquals(widgetLayoutHeightDp(3, true, true), layout.allocatedHeightDp)
+        assertEquals(widgetLayoutHeightDp(uniformRows(3), true, true), layout.allocatedHeightDp)
         // The remainder beyond what fits — exactly three, the rest of the
         // list — never the entire list.
         assertEquals(3, servers.size - rows.take(layout.gridRows).sumOf { it.size })
@@ -795,7 +810,7 @@ class WidgetContentTest {
             val budget = 2 * pitch
             for (rows in 0..3) {
                 for (overflow in listOf(false, true)) {
-                    val layout = widgetVerticalLayout(rows, overflow, budget)
+                    val layout = widgetVerticalLayout(uniformRows(rows), overflow, budget)
                     assertTrue(
                         "2-row ${budget}dp allocation: ${layout.allocatedHeightDp}dp render exceeds it",
                         layout.allocatedHeightDp <= budget,
