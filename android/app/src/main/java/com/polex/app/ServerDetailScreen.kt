@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,7 +24,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -150,10 +148,13 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
     }
 
     /** The single power action, chosen by the server's current state:
-     *  online → power off over SSH, offline → send a wake packet. */
+     *  online → power off over SSH, offline → send a wake packet. The send
+     *  and the result/snackbar handling are the shared power flow (Power.kt). */
     fun sendPower() {
         val s = status ?: return
         if (powerBusy) return
+        // The direction must be available (SSH configured / MAC set) — the
+        // dialog's confirm button is gated on the same rule.
         if (s.online) {
             if (!s.sshConfigured()) return
         } else {
@@ -161,17 +162,9 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
         powerBusy = true
         scope.launch {
-            val result = if (s.online) Api.sendShutdown(context, s.id) else Api.sendWol(context, s.id)
+            val message = sendPowerAction(context, s)
             powerBusy = false
-            val ok = result.code in 200..299 && parseOk(result.body)
-            snackbar.showSnackbar(
-                when {
-                    s.online && ok -> "Shutdown command sent to ${s.name}"
-                    s.online -> "Shutdown failed: ${friendlyError(result.body)}"
-                    ok -> "Wake packet sent to ${s.name}"
-                    else -> "WOL failed: ${friendlyError(result.body)}"
-                }
-            )
+            snackbar.showSnackbar(message)
         }
     }
 
@@ -333,43 +326,19 @@ fun ServerDetailScreen(serverId: Int, onBack: () -> Unit, onAuthError: () -> Uni
         }
     }
 
-    // Power-action confirmation dialog. The action follows the server's
-    // current state: online → power off over SSH, offline → send a wake
-    // packet; the confirm button is enabled only for the available
-    // direction (SSH configured / MAC set).
+    // Power-action confirmation dialog — the shared power flow (Power.kt):
+    // the action follows the server's current state, and the confirm button
+    // is enabled only for the available direction (SSH configured / MAC set).
     val confirmTarget = if (powerConfirm) status else null
     confirmTarget?.let { s ->
-        AlertDialog(
-            onDismissRequest = { powerConfirm = false },
-            title = { Text(if (s.online) "Power off ${s.name}?" else "Send wake to ${s.name}?") },
-            text = {
-                Text(
-                    when {
-                        s.online && s.sshConfigured() ->
-                            "The power off command (${s.effectivePoweroffCommand()}) will be sent to ${s.name} (${s.ip}) over SSH. It only works while the server's OS is responsive — a wedged or unreachable server will not power off."
-                        s.online ->
-                            "This server has no SSH power-off configured (SSH user plus a key path and/or password), so it cannot be powered off from the app."
-                        s.mac.isNotEmpty() ->
-                            "A Wake-on-LAN packet will be sent to ${s.mac} (${s.ip})."
-                        else ->
-                            "This server has no MAC address configured, so WOL cannot be sent."
-                    }
-                )
+        PowerConfirmDialog(
+            s,
+            busy = powerBusy,
+            onConfirm = {
+                powerConfirm = false
+                sendPower()
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        powerConfirm = false
-                        sendPower()
-                    },
-                    enabled = (if (s.online) s.sshConfigured() else s.mac.isNotEmpty()) && !powerBusy,
-                ) {
-                    Text(if (s.online) "Power off" else "Power on", color = if (s.online) OfflineRed else Color.Unspecified)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { powerConfirm = false }) { Text("Cancel") }
-            },
+            onDismiss = { powerConfirm = false },
         )
     }
 

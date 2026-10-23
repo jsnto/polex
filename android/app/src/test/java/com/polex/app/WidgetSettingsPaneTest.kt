@@ -162,16 +162,16 @@ class WidgetSettingsPaneTest {
      *  calls and coroutine callbacks take a few hundred ms on the JVM). */
     private fun waitFor(what: String, deadlineMs: Long = 30_000, block: () -> Unit) {
         val end = System.currentTimeMillis() + deadlineMs
-        var last: Throwable? = null
         while (true) {
             try {
                 block()
                 return
             } catch (e: Throwable) {
-                last = e
-            }
-            if (System.currentTimeMillis() >= end) {
-                throw AssertionError("timed out waiting for: $what", last)
+                // The timeout check lives inside the catch: a failed attempt
+                // at or past the deadline throws with that attempt's error.
+                if (System.currentTimeMillis() >= end) {
+                    throw AssertionError("timed out waiting for: $what", e)
+                }
             }
             Thread.sleep(100)
         }
