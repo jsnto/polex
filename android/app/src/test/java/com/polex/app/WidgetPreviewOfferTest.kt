@@ -109,13 +109,9 @@ class WidgetPreviewOfferTest {
     fun widgetInfoDeclaresTheOfferMatrix() {
         val ctx = context()
         val res = ctx.resources
-        val raw = res.getXml(R.xml.polex_widget_info)
-        // Depending on the framework build, getXml() returns either the
-        // parser itself or a block exposing it — handle both.
-        val parser: XmlResourceParser = when {
-            raw is XmlResourceParser -> raw
-            else -> raw.javaClass.getMethod("getParser").invoke(raw) as XmlResourceParser
-        }
+        // getXml() is declared to return the parser directly; no fallback
+        // unwrapping needed.
+        val parser = res.getXml(R.xml.polex_widget_info)
         // Step to the <appwidget-provider> element.
         while (parser.eventType != XmlResourceParser.START_TAG) parser.next()
         assertEquals("appwidget-provider", parser.name)
@@ -177,13 +173,9 @@ class WidgetPreviewOfferTest {
     @Test
     fun offerRangesPerLauncherClassMatchTheDocumentedMatrix() {
         val res = context().resources
-        val raw = res.getXml(R.xml.polex_widget_info)
-        // Depending on the framework build, getXml() returns either the
-        // parser itself or a block exposing it — handle both.
-        val parser: XmlResourceParser = when {
-            raw is XmlResourceParser -> raw
-            else -> raw.javaClass.getMethod("getParser").invoke(raw) as XmlResourceParser
-        }
+        // getXml() is declared to return the parser directly; no fallback
+        // unwrapping needed.
+        val parser = res.getXml(R.xml.polex_widget_info)
         while (parser.eventType != XmlResourceParser.START_TAG) parser.next()
         assertEquals("appwidget-provider", parser.name)
 

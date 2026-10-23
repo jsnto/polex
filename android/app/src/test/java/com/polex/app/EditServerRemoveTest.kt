@@ -156,9 +156,8 @@ class EditServerRemoveTest {
         compose.onNodeWithText("Edit settings").performScrollTo()
         // Click retries: the detail page's 15 s auto-refresh recomposes the
         // screen, and a click landing mid-recomposition can be dropped.
-        var opened = false
         waitFor("edit form (Danger zone reachable)") {
-            opened = hasNode("Danger zone")
+            val opened = hasNode("Danger zone")
             if (!opened) compose.onNodeWithText("Edit settings").performClick()
             assertTrue("edit form did not open", opened)
         }
@@ -167,9 +166,8 @@ class EditServerRemoveTest {
     }
 
     private fun openRemoveDialog() {
-        var shown = false
         waitFor("Delete server? dialog") {
-            shown = hasNode("Delete server?")
+            val shown = hasNode("Delete server?")
             if (!shown) compose.onNodeWithText("Remove server").performClick()
             assertTrue("dialog did not appear", shown)
         }
@@ -183,7 +181,6 @@ class EditServerRemoveTest {
      *  still exists while the hit target behind it has already changed, so a
      *  rapid second click could land on the form. */
     private fun clickDialogButton(label: String, what: String) {
-        var dismissed = false
         var lastClickAt = 0L
         waitFor(what) {
             val now = System.currentTimeMillis()
@@ -191,8 +188,7 @@ class EditServerRemoveTest {
                 compose.onNodeWithText(label).performClick()
                 lastClickAt = System.currentTimeMillis()
             }
-            dismissed = !hasNode("Delete server?")
-            assertTrue("dialog still open after $label", dismissed)
+            assertTrue("dialog still open after $label", !hasNode("Delete server?"))
         }
     }
 
@@ -201,16 +197,16 @@ class EditServerRemoveTest {
      *  Catches Throwable: JUnit assertions throw AssertionError, an Error. */
     private fun waitFor(what: String, deadlineMs: Long = 30_000, block: () -> Unit) {
         val end = System.currentTimeMillis() + deadlineMs
-        var last: Throwable? = null
         while (true) {
             try {
                 block()
                 return
             } catch (e: Throwable) {
-                last = e
-            }
-            if (System.currentTimeMillis() >= end) {
-                throw AssertionError("timed out waiting for: $what", last)
+                // The timeout check lives inside the catch: a failed attempt
+                // at or past the deadline throws with that attempt's error.
+                if (System.currentTimeMillis() >= end) {
+                    throw AssertionError("timed out waiting for: $what", e)
+                }
             }
             Thread.sleep(100)
         }

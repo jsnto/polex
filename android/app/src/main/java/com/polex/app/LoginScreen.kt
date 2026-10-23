@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -100,7 +100,7 @@ fun LoginScreen(onLogin: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            imageVector = Icons.Default.Login,
+            imageVector = Icons.AutoMirrored.Filled.Login,
             contentDescription = null,
             modifier = Modifier.height(48.dp),
             tint = MaterialTheme.colorScheme.primary,

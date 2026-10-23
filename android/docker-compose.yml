@@ -15,10 +15,13 @@ services:
       TASKS: ${TASKS:-assembleDebug}
     # The daemon runs this via `sh -c`, so the chain is written flat and the
     # folded scalar keeps it on a single line (no nested quoting, no `\;`).
+    # The APK copy tolerates non-APK tasks (e.g. TASKS=:app:testDebugUnitTest,
+    # the documented JVM test path): no outputs dir means nothing to copy,
+    # and the run exits 0 instead of failing on the find.
     command: >-
       sh -c 'gradle --no-daemon --console=plain ${TASKS} &&
       mkdir -p /out &&
-      find app/build/outputs/apk -name "*.apk" -exec cp {} /out/ \; &&
+      if [ -d app/build/outputs/apk ]; then find app/build/outputs/apk -name "*.apk" -exec cp {} /out/ \; ; else echo "no APK output copied (TASKS=${TASKS} does not build an APK)"; fi &&
       ls -lh /out'
     volumes:
       - ./dist:/out                 # APKs land here

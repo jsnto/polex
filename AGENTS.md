@@ -82,7 +82,7 @@ every in-app status poll, and on the widget's system update tick
   `.env.example`) — never hardcode them or commit a real `.env`.
 - The backend runs plain HTTP on the LAN; token auth is the only intended
   protection. Do not add TLS scaffolding unless asked.
-- Backend: tiny test suite (`version_test.go`); verify changes with
+- Backend: test suite (`*_test.go`); verify changes with
   `go vet ./...`, `go test ./...`, and a live `curl` round-trip (see
   `backend/AGENTS.md` for the smoke test).
 - Android: JVM unit tests live in `android/app/src/test/` (no device needed);

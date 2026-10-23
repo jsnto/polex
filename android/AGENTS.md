@@ -95,8 +95,9 @@ errors. Prefer that over manual runs when verifying app changes.
   `check` field: `"tcp"` default / `"ping"`); auth responses in
   `LoginScreen.kt` must match `backend/auth.go` (`{ok, token}` / 401
   `{ok:false,error}`). Check the backend README when changing either.
-- **Power flow**: dashboard and detail page each keep a `powerBusy` flag and
-  a confirmation dialog; the power button's direction follows the server's
+- **Power flow**: the shared `PowerConfirmDialog` + `sendPowerAction` in
+  `Power.kt` (the dashboard and detail page each keep their own `powerBusy`
+  flag and dialog state); the power button's direction follows the server's
   current online state — offline: `Api.sendWol(context, id)` →
   `POST /api/servers/:id/wol`; online: `Api.sendShutdown(context, id)` →
   `POST /api/servers/:id/shutdown` (sends the server's poweroff command over
