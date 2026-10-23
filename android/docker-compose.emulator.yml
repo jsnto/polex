@@ -10,6 +10,11 @@
 # The host's ./dist directory is mounted read-only at /apk inside the
 # container so the test script can install APKs from there.
 #
+# The shared smoke pipeline (scripts/emulator-pipeline.sh) is mounted
+# read-only at /pipeline: scripts/test-emulator.sh and
+# scripts/windows/test-emulator.ps1 both exec it in-container, so the
+# boot/install/verify logic has one implementation.
+#
 # The image runs its own adb server (the emulator starts with
 # -skip-adb-auth), so talk to it via `docker compose exec ... adb`; no
 # ADBKEY or published ports are needed.
@@ -31,3 +36,4 @@ services:
     volumes:
       - /dev/kvm:/dev/kvm
       - ./dist:/apk:ro
+      - ../scripts/emulator-pipeline.sh:/pipeline/emulator-pipeline.sh:ro

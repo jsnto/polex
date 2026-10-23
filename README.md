@@ -101,7 +101,10 @@ backend/          Go + Gin REST API  (see backend/README.md, backend/AGENTS.md)
 android/          Android app (Kotlin + Compose + Glance widget)
                   (see android/README.md, android/AGENTS.md)
 scripts/          helpers: start-backend.sh, build-apk.sh, test-emulator.sh
+                  (emulator-pipeline.sh is the shared in-container step the
+                  emulator smoke test execs)
 scripts/windows/  PowerShell equivalents: *.ps1 (Windows + Docker Desktop)
+.github/          CI workflow: backend go vet + go test, Android JVM tests
 AGENTS.md         guidance for AI coding agents working in this repo
 ```
 
@@ -143,6 +146,9 @@ servers on first run — edit or use the app to change them).
 All routes except `GET /api/health` and `POST /api/login` require an
 `Authorization: Bearer <token>` header (token from `/api/login`);
 unauthenticated calls get `401`.
+
+The route table below is the **single source of truth** for the route
+list; `backend/README.md` points here instead of repeating it.
 
 | Method | Path                | Description                                            |
 |--------|---------------------|--------------------------------------------------------|
