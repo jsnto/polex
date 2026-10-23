@@ -89,10 +89,10 @@ func TestSubnetBroadcast24(t *testing.T) {
 		{"192.168.1.10", "192.168.1.255"},
 		{"10.0.0.5", "10.0.0.255"},
 		{"172.16.5.99", "172.16.5.255"},
-		{"192.168.1.0", "192.168.1.255"},     // the network address maps to the same broadcast
-		{"192.168.1.255", "192.168.1.255"},   // idempotent on the broadcast itself
-		{"2001:db8::1", ""},                  // IPv6: no /24 broadcast
-		{"not-an-ip", ""},                    // unparseable
+		{"192.168.1.0", "192.168.1.255"},   // the network address maps to the same broadcast
+		{"192.168.1.255", "192.168.1.255"}, // idempotent on the broadcast itself
+		{"2001:db8::1", ""},                // IPv6: no /24 broadcast
+		{"not-an-ip", ""},                  // unparseable
 		{"", ""},
 	}
 	for _, c := range cases {

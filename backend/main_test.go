@@ -330,11 +330,11 @@ func TestAddServerRejectsInvalidBodies(t *testing.T) {
 	r, st := crudRouter(t, seededServers()...)
 	cases := []string{
 		`{"ip":"127.0.0.1"}`,                                     // no name
-		`{"name":"x"}`,                                            // no ip
-		`{"name":"x","ip":"not-an-ip"}`,                           // bad ip
-		`{"name":"x","ip":"127.0.0.1","mac":"zz:00"}`,             // bad mac
-		`{"name":"x","ip":"127.0.0.1","check":"carrier-pigeon"}`,  // bad check
-		`{"name":"x","ip":"127.0.0.1","sshUser":"root"}`,          // ssh user without credentials
+		`{"name":"x"}`,                                           // no ip
+		`{"name":"x","ip":"not-an-ip"}`,                          // bad ip
+		`{"name":"x","ip":"127.0.0.1","mac":"zz:00"}`,            // bad mac
+		`{"name":"x","ip":"127.0.0.1","check":"carrier-pigeon"}`, // bad check
+		`{"name":"x","ip":"127.0.0.1","sshUser":"root"}`,         // ssh user without credentials
 		`{bad json`,
 	}
 	for _, body := range cases {
