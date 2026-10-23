@@ -50,19 +50,10 @@ All endpoints except `GET /api/health` and `POST /api/login` require an
 `Authorization: Bearer <token>` header (token from `/api/login`). Unauth
 requests get `401 {"ok": false, "error": "unauthorized"}`.
 
-| Method | Path                   | Auth | Description                        |
-|--------|------------------------|------|------------------------------------|
-| GET    | `/api/health`          | no   | liveness                           |
-| POST   | `/api/login`           | no   | `{username, password, remember?}` → `{ok, token}` (401 on bad creds); `remember: true` grants a token with the `POLEX_REMEMBER_TTL` lifetime |
-| GET    | `/api/servers`         | yes  | configured servers                 |
-| POST   | `/api/servers`         | yes  | add `{name, ip, mac?, port?, check?, sshUser?, sshKeyPath?, sshPassword?, poweroffCommand?}` |
-| POST   | `/api/servers/reorder` | yes  | set order `{order: [id, ...]}`        |
-| PUT    | `/api/servers/:id`     | yes  | update server                      |
-| DELETE | `/api/servers/:id`     | yes  | remove server                      |
-| GET    | `/api/status`          | yes  | live status of all servers         |
-| POST   | `/api/servers/:id/wol` | yes  | send Wake-on-LAN packet            |
-| POST   | `/api/servers/:id/shutdown` | yes | clean SSH shutdown (sends the server's poweroff command, default `sudo systemctl poweroff`; key then password auth), see below |
-| GET    | `/api/version`         | yes  | backend version `{"version":"…"}` (constant `Version` in `version.go`) |
+The route table (method + path per endpoint) is maintained in one place:
+the REST API table in the root [`README.md`](../README.md). This page
+documents the backend-specific payload and response semantics instead of
+repeating the table.
 
 Tokens are random 64-hex-char session tokens kept in memory; they expire
 after `POLEX_TOKEN_TTL` (default 30 days) and die on backend restart.

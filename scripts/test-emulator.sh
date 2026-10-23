@@ -5,8 +5,14 @@
 #   1. build the debug APK (if missing or --build)
 #   2. start the backend (skipped if already answering on :8080)
 #   3. boot an Android emulator in Docker (needs /dev/kvm)
-#   4. install the APK and launch the app
-#   5. verify: app window is focused, no fatal crashes, grab a screenshot
+#   4. run the shared in-container pipeline (scripts/emulator-pipeline.sh,
+#      mounted at /pipeline): wait for boot, install the APK, launch the
+#      app, verify window focus + no fatal crashes, capture a screenshot
+#   5. copy the screenshot out to android/dist/
+#
+# The boot/install/verify logic lives in scripts/emulator-pipeline.sh so
+# the bash and PowerShell entry points drive the same single
+# implementation.
 #
 # Usage:
 #   ./scripts/test-emulator.sh               # full smoke test
@@ -23,8 +29,6 @@ COMPOSE="$ANDROID_DIR/docker-compose.emulator.yml"
 # us-docker.pkg.dev is anonymous-pull; ghcr.io/gcr.io are blocked on some
 # networks (and the old "reviewdog" image name didn't exist publicly).
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:30.1.2}"
-APK_PACKAGE="com.polex.app"
-APK_ACTIVITY="com.polex.app.MainActivity"
 BACKEND_URL="http://localhost:8080"
 
 DO_BUILD=0
@@ -65,6 +69,14 @@ fi
 [ -f "$APK" ] || { echo "ERROR: APK not found: $APK" >&2; exit 1; }
 echo "==> APK: $APK"
 
+# The container mounts ./dist at /apk (read-only), so the APK to install must
+# live there. Copy a custom --apk path in if it doesn't already.
+APK_BASE="$(basename "$APK")"
+if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/dist" ]; then
+    cp "$APK" "$ANDROID_DIR/dist/"
+    APK_BASE="$(basename "$APK")"
+fi
+
 # --- 2. backend ----------------------------------------------------------------
 if curl -sf -m 2 "$BACKEND_URL/api/health" >/dev/null 2>&1; then
     echo "==> Backend already running at $BACKEND_URL"
@@ -84,72 +96,29 @@ else
     echo "==> Backend up (pid $BACKEND_PID)"
 fi
 
-# The image ships its own adb client+server (emulator runs with
-# -skip-adb-auth); use the full path since PATH inside the image is
-# not guaranteed to include platform-tools.
-adb() { docker compose -f "$COMPOSE" exec -T emulator /android/sdk/platform-tools/adb "$@"; }
-
-# The container mounts ./dist at /apk (read-only), so the APK to install must
-# live there. Copy a custom --apk path in if it doesn't already.
-APK_IN_CONTAINER="/apk/$(basename "$APK")"
-if [ "$(cd "$(dirname "$APK")" && pwd)" != "$ANDROID_DIR/dist" ]; then
-    cp "$APK" "$ANDROID_DIR/dist/"
-fi
-
 # --- 3. emulator ---------------------------------------------------------------
 echo "==> Booting Android emulator in Docker (image: $EMULATOR_IMAGE)"
 docker compose -f "$COMPOSE" up -d  # EMULATOR_IMAGE is inherited via env
-echo "==> Waiting for boot (up to ~5 min)"
-adb wait-for-device
-BOOTED=0
-for _ in $(seq 1 60); do
-    B="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-    [ "$B" = "1" ] && { BOOTED=1; break; }
-    sleep 5
-done
-[ $BOOTED -eq 1 ] || { echo "ERROR: emulator did not finish booting" >&2; exit 1; }
-echo "==> Emulator booted"
 
-# --- 4. install + launch ---------------------------------------------------------
-echo "==> Installing APK"
-adb install -r "$APK_IN_CONTAINER"
-
-echo "==> Launching $APK_ACTIVITY"
-adb shell am start -n "$APK_ACTIVITY" >/dev/null
-sleep 5
-
-# --- 5. verify -------------------------------------------------------------------
+# --- 4. shared in-container pipeline -------------------------------------------
+# One implementation of the boot/install/launch/verify steps, shared with
+# scripts/windows/test-emulator.ps1 (the same file, exec'd in the container).
 FAIL=0
-
-FOCUS="$(adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -2 || true)"
-echo "--- focused window ---"
-echo "$FOCUS"
-if ! grep -q "$APK_PACKAGE" <<<"$FOCUS"; then
-    echo "FAIL: app window is not focused"; FAIL=1
-else
-    echo "PASS: app window is focused"
+if ! docker compose -f "$COMPOSE" exec -T emulator sh /pipeline/emulator-pipeline.sh "$APK_BASE"; then
+    FAIL=1
 fi
 
-CRASHES="$(adb logcat -d -s AndroidRuntime:E 2>/dev/null | tail -10 || true)"
-if [ -n "$CRASHES" ]; then
-    echo "FAIL: fatal exception in logcat:"; echo "$CRASHES"; FAIL=1
-else
-    echo "PASS: no fatal crashes in logcat"
-fi
-
+# --- 5. screenshot ---------------------------------------------------------------
+# The pipeline wrote it to /tmp/screenshot.png inside the container; stream
+# it out to the host's android/dist/.
 SHOT="$ROOT/android/dist/screenshot-$(date +%Y%m%d-%H%M%S).png"
-if adb exec-out screencap -p > "$SHOT" 2>/dev/null && [ -s "$SHOT" ]; then
+if docker compose -f "$COMPOSE" exec -T emulator cat /tmp/screenshot.png > "$SHOT" 2>/dev/null && [ -s "$SHOT" ]; then
     echo "PASS: screenshot saved: $SHOT"
 else
-    echo "WARN: could not capture screenshot"
+    rm -f "$SHOT"
+    echo "WARN: no screenshot captured"
 fi
 
-echo
-if [ $FAIL -eq 0 ]; then
-    echo "=== SMOKE TEST PASSED ==="
-else
-    echo "=== SMOKE TEST FAILED ==="
-fi
 [ $KEEP -eq 1 ] && {
     echo "Emulator left running. Useful commands:"
     echo "  docker compose -f android/docker-compose.emulator.yml exec emulator /android/sdk/platform-tools/adb shell"

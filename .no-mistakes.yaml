@@ -1,5 +1,6 @@
 # no-mistakes repository configuration
 #
-# This repository has no CI workflows or check-runs; the pipeline CI step
-# must not babysit an open PR for checks that will never register.
-no_ci: true
+# CI exists: .github/workflows/ci.yml registers a backend job (go vet +
+# go test) and an android job (JVM unit tests) on push/PR, so the
+# pipeline CI step may wait on the registered checks.
+no_ci: false

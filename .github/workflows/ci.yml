@@ -1,0 +1,49 @@
+# CI: the backend's `go vet` + `go test` and the Android JVM unit tests.
+#
+# Both jobs use the repo's own toolchain images, so CI adds no second
+# toolchain definition:
+#   backend: golang:1.22-alpine (the backend Dockerfile's build stage)
+#   android: the polex-android-builder image built from android/Dockerfile
+#            (JDK 17 + Android SDK 34 + Gradle 8.7 — the repo deliberately
+#            has no gradle wrapper; the image supplies Gradle)
+#
+# The android job builds that image once per run (no Docker cache on the
+# runner) and runs the gradle task inside it with the checkout mounted,
+# so the exact same image the local build path uses does the work; that
+# image build is the price of a single toolchain source.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  backend:
+    name: "backend: go vet + go test"
+    runs-on: ubuntu-latest
+    container: golang:1.22-alpine
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+
+  android:
+    name: "android: JVM unit tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the builder image (same Dockerfile the local build uses)
+        run: docker build -t polex-android-builder -f android/Dockerfile android/
+      - name: gradle :app:testDebugUnitTest
+        run: >
+          docker run --rm
+          -v "$GITHUB_WORKSPACE/android:/ws"
+          -w /ws
+          polex-android-builder
+          gradle --no-daemon --console=plain :app:testDebugUnitTest

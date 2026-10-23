@@ -16,6 +16,19 @@ APK_DIR="$ANDROID_DIR/dist"
 TASK="${1:-debug}"
 METHOD="${2:-docker}"   # docker | local
 
+# Source-fingerprint gate, executed INSIDE the freshly built image. It
+# compares the host tree (mounted read-only at /hostsrc, i.e. the live
+# working tree) against the image's copy (COPY . . at build time) and
+# aborts if they differ — the failure mode that kept biting: a silent
+# stale copy making old `e:` errors reappear.
+#
+# The command is computed in-container so the bash and PowerShell
+# build-apk scripts run the exact same one-liner (no platform-specific
+# md5 code to drift). It is written to contain NO single quotes (it must
+# also sit in a PowerShell single-quoted string in
+# scripts/windows/build-apk.ps1) and uses dash-compatible syntax.
+FINGERPRINT_GATE='h=$(cd /hostsrc && find . -type f | sort | xargs md5sum | md5sum | awk "{print \$1}"); i=$(cd /workspace/app/src && find . -type f | sort | xargs md5sum | md5sum | awk "{print \$1}"); if [ "$h" != "$i" ]; then echo "ERROR: image source != host source - the build is using stale source." >&2; echo "  host : $h" >&2; echo "  image: $i" >&2; echo "  The Dockerfile COPY . . did not pick up your working tree." >&2; echo "  Check you are not shadowing the context; the compose file in" >&2; echo "  android/ builds from the android/ directory (build context)." >&2; exit 1; fi; echo "==> Source verified in image (md5 $i)"'
+
 build_docker() {
     if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
         echo "ERROR: docker not available (use 'local' method)" >&2
@@ -29,39 +42,26 @@ build_docker() {
     esac
     echo "==> Building APK in container (gradle $tasks)"
     cd "$ANDROID_DIR"
-    # 1) Fingerprint the host source (relative paths, so it's comparable to
-    #    the image copy regardless of the in-container WORKDIR).
-    local host_src
-    host_src=$(cd app/src && find . -type f | sort | xargs md5sum | md5sum | awk '{print $1}')
-
-    # 2) Remove containers AND the persistent gradle-cache volume. A poisoned
-    #    Kotlin incremental-compile cache replays old `e:` errors even on fresh
-    #    source, so a plain `down` (no -v) isn't enough.
+    # 1) Remove containers AND the persistent gradle-cache volume. A
+    #    poisoned Kotlin incremental-compile cache replays old `e:` errors
+    #    even on fresh source, so a plain `down` (no -v) isn't enough.
     docker compose down -v >/dev/null 2>&1 || true
 
-    # 3) Rebuild the image. --no-cache forces COPY . . to re-copy the current
-    #    source instead of reusing a cached (stale) layer. (This re-runs the
-    #    SDK/gradle install steps; it's the price of a guaranteed-fresh copy.)
-    echo "==> Building image (no cache — guarantees fresh source copy)..."
+    # 2) Rebuild the image. --no-cache forces COPY . . to re-copy the
+    #    current source instead of reusing a cached (stale) layer. (This
+    #    re-runs the SDK/gradle install steps; it's the price of a
+    #    guaranteed-fresh copy.)
+    echo "==> Building image (no cache - guarantees fresh source copy)..."
     docker compose build --no-cache apk
 
-    # 4) Hard-gate: verify the image actually contains the current source
-    #    BEFORE spending a full compile. This is the failure mode that kept
-    #    biting — a silent stale copy making the old errors reappear.
-    local image_src
-    image_src=$(docker compose run --rm apk sh -c 'cd /workspace/app/src && find . -type f | sort | xargs md5sum | md5sum | awk "{print \$1}"')
-    if [ "$host_src" != "$image_src" ]; then
-        echo "ERROR: image source != host source — the build is using stale source." >&2
-        echo "  host : $host_src" >&2
-        echo "  image: $image_src" >&2
-        echo "  The Dockerfile's COPY . . did not pick up your working tree." >&2
-        echo "  Check you're not shadowing the context; the compose file at" >&2
-        echo "  $ANDROID_DIR uses '.' as the build context (android/ dir)." >&2
-        exit 1
-    fi
-    echo "==> Source verified in image (md5 ${host_src:0:12}...)"
+    # 3) Hard-gate: verify the image actually contains the current source
+    #    BEFORE spending a full compile (the in-container one-liner above,
+    #    byte-identical to scripts/windows/build-apk.ps1).
+    local host_src_abs
+    host_src_abs="$(cd app/src && pwd)"
+    docker compose run --rm -T -v "$host_src_abs:/hostsrc:ro" apk sh -c "$FINGERPRINT_GATE"
 
-    # 5) Build from the verified image. --exit-code-from propagates a
+    # 4) Build from the verified image. --exit-code-from propagates a
     #    failed gradle run to this script (plain `up` exits 0 even when
     #    the container build fails, which would ship an empty dist/ as
     #    "success").
