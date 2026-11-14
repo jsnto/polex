@@ -142,7 +142,7 @@ else {
         "app\build\outputs\apk\release\polex-release.apk"
     }
     Write-Host "==> Building APK locally" -ForegroundColor Cyan
-    & ".\gradlew.bat" $Task
+    & ".\gradlew.bat" --no-daemon $Task
     if ($LASTEXITCODE -ne 0) { throw "ERROR: gradle build failed" }
     New-Item -ItemType Directory -Force -Path $ApkDir | Out-Null
     Copy-Item (Join-Path $AndroidDir $outRel) $ApkDir

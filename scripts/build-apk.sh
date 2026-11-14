@@ -117,7 +117,7 @@ build_local() {
         *) echo "ERROR: task must be 'debug' or 'release'" >&2; exit 1 ;;
     esac
     echo "==> Building APK locally"
-    ./gradlew "$TASK"
+    ./gradlew --no-daemon "$TASK"
     mkdir -p "$APK_DIR"
     cp "$out" "$APK_DIR/"
 }
