@@ -9,8 +9,10 @@
 # override the location with POLEX_SIGNING_DIR) at /release, and the
 # in-container paths are exported as POLEX_RELEASE_KEYSTORE / _PROPS —
 # app/build.gradle.kts wires the release signingConfig from them, so every
-# published APK is signed by the one permanent key. The key is NEVER baked
-# into the image (it is outside the build context) and never regenerated.
+# published APK is signed by the one permanent key. The service command
+# refuses a release build up front when the key is missing. The key is
+# NEVER baked into the image (it is outside the build context) and never
+# regenerated.
 #
 # APKs are copied to ./dist (polex-debug.apk / polex-release.apk).
 services:
@@ -27,11 +29,15 @@ services:
       POLEX_RELEASE_KEYSTORE_PROPS: /release/keystore.properties
     # The daemon runs this via `sh -c`, so the chain is written flat and the
     # folded scalar keeps it on a single line (no nested quoting, no `\;`).
-    # The APK copy tolerates non-APK tasks (e.g. TASKS=:app:testDebugUnitTest,
+    # The up-front check refuses a release build when the mounted key is
+    # missing (compose auto-creates an absent bind source as an empty dir,
+    # and AGP would otherwise package an unsigned release APK). The APK
+    # copy tolerates non-APK tasks (e.g. TASKS=:app:testDebugUnitTest,
     # the documented JVM test path): no outputs dir means nothing to copy,
     # and the run exits 0 instead of failing on the find.
     command: >-
-      sh -c 'gradle --no-daemon --console=plain ${TASKS} &&
+      sh -c 'case " $TASKS " in *assembleRelease*) if [ ! -f /release/polex-release.jks ] || [ ! -f /release/keystore.properties ]; then echo "ERROR: TASKS=${TASKS} selects assembleRelease but the release signing key is missing (need /release/polex-release.jks + /release/keystore.properties). Refusing to build an unsigned release APK - point POLEX_SIGNING_DIR at the stable signing dir." >&2; exit 1; fi ;; esac;
+      gradle --no-daemon --console=plain ${TASKS} &&
       mkdir -p /out &&
       if [ -d app/build/outputs/apk ]; then find app/build/outputs/apk -name "*.apk" -exec cp {} /out/ \; ; else echo "no APK output copied (TASKS=${TASKS} does not build an APK)"; fi &&
       ls -lh /out'
@@ -39,9 +45,10 @@ services:
       - ./dist:/out                 # APKs land here
       - gradle-cache:/root/.gradle  # dependency cache survives rebuilds
       # Stable release signing key (read-only). The dir holds the keystore
-      # + keystore.properties; if it is absent the mount source is created
-      # empty and the release variant fails to sign (it never regenerates
-      # a key) while debug builds are unaffected.
+      # + keystore.properties. If it is absent the mount source is created
+      # empty and the command's up-front check refuses assembleRelease with
+      # a clear error (it never regenerates a key or ships an unsigned
+      # release APK) while debug builds are unaffected.
       - ${POLEX_SIGNING_DIR:-/home/jasonto/polex-signing}:/release:ro
 
 volumes:

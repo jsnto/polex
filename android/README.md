@@ -95,8 +95,9 @@ docker compose up --build apk     # builds debug APK (manual equivalent)
 
 # optional: also/instead build a release APK (signed with the stable
 # polex release key - the one permanent keystore kept outside the repo
-# at /home/jasonto/polex-signing, mounted read-only at /release; see the
-# "release signing" bullet in AGENTS.md)
+# at /home/jasonto/polex-signing, mounted read-only at /release; the
+# compose command refuses a release build up front when the key is
+# missing; see the "release signing" bullet in AGENTS.md)
 TASKS="assembleRelease" docker compose up apk   # → dist/polex-release.apk
 ```
 

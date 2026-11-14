@@ -162,10 +162,11 @@ errors. Prefer that over manual runs when verifying app changes.
   read-only at `/release` (`android/docker-compose.yml`; the host location
   is overridable via `POLEX_SIGNING_DIR`) and exports the in-container
   paths as those env vars; `scripts/build-apk.sh` (and the Windows mirror)
-  export them at the host paths for `local` release builds and fail a
-  release build early when the key is missing. If the env vars are unset
-  or the files absent, the release variant keeps an empty signing config
-  and packaging fails loudly — it must NEVER fall back to the debug
+  export them at the host paths for `local` release builds and refuse a
+  release build early when the key is missing (the compose command does
+  the same in-container for raw `docker compose up` invocations). If the
+  env vars are nonetheless unset or the files absent, the release variant
+  keeps an empty signing config — it must NEVER fall back to the debug
   keystore or regenerate a key: the per-build fresh debug key is what made
   the published v1.3/v1.4 APKs un-updatable on device
   (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Losing the key orphans every

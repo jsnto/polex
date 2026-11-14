@@ -110,14 +110,14 @@ build_local() {
         echo "==> Creating gradle wrapper (one-time)"
         gradle wrapper --gradle-version 8.7
     fi
-    local out
+    local tasks out
     case "$TASK" in
-        debug)   out="app/build/outputs/apk/debug/polex-debug.apk" ;;
-        release) out="app/build/outputs/apk/release/polex-release.apk" ;;
+        debug)   tasks="assembleDebug";   out="app/build/outputs/apk/debug/polex-debug.apk" ;;
+        release) tasks="assembleRelease"; out="app/build/outputs/apk/release/polex-release.apk" ;;
         *) echo "ERROR: task must be 'debug' or 'release'" >&2; exit 1 ;;
     esac
     echo "==> Building APK locally"
-    ./gradlew --no-daemon "$TASK"
+    ./gradlew --no-daemon "$tasks"
     mkdir -p "$APK_DIR"
     cp "$out" "$APK_DIR/"
 }

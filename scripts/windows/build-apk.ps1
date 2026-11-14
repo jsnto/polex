@@ -136,13 +136,14 @@ else {
         Write-Host "==> Creating gradle wrapper (one-time)" -ForegroundColor Cyan
         gradle wrapper --gradle-version 8.7
     }
+    $gradleTask = if ($Task -eq "debug") { "assembleDebug" } else { "assembleRelease" }
     $outRel = if ($Task -eq "debug") {
         "app\build\outputs\apk\debug\polex-debug.apk"
     } else {
         "app\build\outputs\apk\release\polex-release.apk"
     }
     Write-Host "==> Building APK locally" -ForegroundColor Cyan
-    & ".\gradlew.bat" --no-daemon $Task
+    & ".\gradlew.bat" --no-daemon $gradleTask
     if ($LASTEXITCODE -ne 0) { throw "ERROR: gradle build failed" }
     New-Item -ItemType Directory -Force -Path $ApkDir | Out-Null
     Copy-Item (Join-Path $AndroidDir $outRel) $ApkDir

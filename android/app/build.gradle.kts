@@ -22,10 +22,13 @@ android {
     // in-app updates — INSTALL_FAILED_UPDATE_INCOMPATIBLE). The Docker
     // build mounts the signing dir at /release and exports the two env
     // vars below; a local release build exports them at the host paths
-    // (scripts/build-apk.sh does this for the canonical location). If
-    // they are unset or the files are missing, the release variant is
-    // left with an empty signing config and packaging fails loudly
-    // instead of minting a fresh key (the debug variant is unaffected).
+    // (scripts/build-apk.sh does this for the canonical location). The
+    // build entry points refuse a release build up front when the key is
+    // missing (host-side in the scripts, in-container in the compose
+    // command). If the env vars are nonetheless unset or the files
+    // missing, the release variant is left with an empty signing config
+    // - never signed with a fresh or the debug key (the debug variant is
+    // unaffected).
     // Pointer to the key, not the key itself: see "Release signing" in
     // android/AGENTS.md.
     signingConfigs {
