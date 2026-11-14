@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The settings "Update" area's FileProvider paths: the app-internal
+     updates/ folder the downloaded release APK lands in (see
+     UpdateManager.kt). The provider hands the APK to the platform's
+     installer through a content uri (a file:// uri is refused). -->
+<paths>
+    <files-path
+        name="updates"
+        path="updates/" />
+</paths>

@@ -37,7 +37,7 @@ screen widget.
   (whose **Danger zone** carries the destructive **Remove server** action —
   see below). System back returns to the dashboard
   (or out of the edit form), not out of the app.
-- **Settings** — minimal menu (Backend / Servers / Log out):
+- **Settings** — minimal menu (Backend / Servers / Widget / Update / Log out):
   - **Backend** — change the backend URL;
   - **Servers** — list with **Add** (new screen), per-server **Edit**
     (same screen, pre-filled) and **Delete** (with confirm dialog), plus
@@ -59,6 +59,10 @@ screen widget.
     (on success it navigates back — to the dashboard when reached from the
     server detail page; on failure a "Remove failed" dialog is shown and
     the error is also kept as the inline message under the form).
+  - **Update** — the app's self-update (there is no store — the app is
+    sideloaded): check the app's own public GitHub releases for a newer
+    version, download the newest release's APK, and install it through the
+    phone's own installer (one-time "install unknown apps" permission).
 - **Home screen widget** (Glance) — at-a-glance 1×1 or 2×1 (2 wide,
   1 tall) tile: a colored
   `N/M UP` + `updated HH:mm` hero over a dot + name server grid — two

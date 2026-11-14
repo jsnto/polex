@@ -1,5 +1,6 @@
 package com.polex.app
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,9 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
@@ -41,11 +43,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,10 +69,10 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 /** Which sub-screen the settings menu shows. */
-private enum class SettingsPane { Menu, Backend, Servers, Widget }
+private enum class SettingsPane { Menu, Backend, Servers, Widget, Update }
 
 /**
- * Minimal settings menu: Backend, Servers, Log out.
+ * Minimal settings menu: Backend, Servers, Widget, Update, Log out.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,6 +104,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
             onBackend = { pane = SettingsPane.Backend },
             onServers = { pane = SettingsPane.Servers },
             onWidget = { pane = SettingsPane.Widget },
+            onUpdate = { pane = SettingsPane.Update },
             onLogout = onLogout,
             onBack = onBack,
         )
@@ -110,6 +115,7 @@ fun SettingsScreen(onBack: () -> Unit, onLogout: () -> Unit) {
             onEdit = { _, entry -> editTarget = entry },
         )
         SettingsPane.Widget -> if (!editing) WidgetScreen(onBack = { pane = SettingsPane.Menu })
+        SettingsPane.Update -> if (!editing) UpdatePane(onBack = { pane = SettingsPane.Menu })
     }
     if (editing) {
         val target = editTarget!!
@@ -131,6 +137,7 @@ private fun MenuPane(
     onBackend: () -> Unit,
     onServers: () -> Unit,
     onWidget: () -> Unit,
+    onUpdate: () -> Unit,
     onLogout: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -142,6 +149,8 @@ private fun MenuPane(
     var backendVersion by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { backendVersion = Api.getBackendVersion(context) }
     val outdated = outdatedSide(appVersion, backendVersion)
+    // The "Update" area's live state (its menu-row subtitle tracks it).
+    val updateState by Updates.manager(context).state.collectAsState(UpdateState.Idle)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -164,6 +173,11 @@ private fun MenuPane(
             MenuRow(icon = Icons.Default.Settings, title = "Backend", subtitle = Prefs.base(context), onClick = onBackend)
             MenuRow(icon = Icons.Filled.Dns, title = "Servers", subtitle = "Add, edit or remove servers", onClick = onServers)
             MenuRow(icon = Icons.Filled.GridView, title = "Widget", subtitle = "What the home-screen widget shows", onClick = onWidget)
+            // The app's self-update (the app is sideloaded - there is no
+            // store): check the public GitHub releases for a newer build
+            // and install the newest release's APK. The subtitle tracks the
+            // live update state (the pane shows the full state + actions).
+            MenuRow(icon = Icons.Filled.SystemUpdate, title = "Update", subtitle = updateState.subtitle(), onClick = onUpdate)
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     VersionRow("App version", appVersion, outdated = (outdated == "app"))
@@ -238,6 +252,173 @@ private fun VersionRow(
         )
     }
 }
+
+/**
+ * The "Update" area's live subtitle for the settings menu row (the pane
+ * shows the full state + the actions).
+ */
+private fun UpdateState.subtitle(): String = when (this) {
+    UpdateState.Idle -> "Check for a newer version"
+    UpdateState.Checking -> "Checking…"
+    is UpdateState.UpToDate -> "Up to date (v$currentVersion)"
+    is UpdateState.UpdateAvailable -> "Update available: v$latestVersion"
+    is UpdateState.Downloading -> "Downloading v$latestVersion…"
+    is UpdateState.ReadyToInstall -> "v$latestVersion ready to install"
+    is UpdateState.Error -> "Check for updates"
+}
+
+/**
+ * The settings "Update" area: whether the running build is the newest
+ * public release of the app's own repository, and (when it is not) the
+ * actions to download and install the newest one. The app is sideloaded as
+ * an APK (there is no store), so the check reads the public GitHub
+ * releases page (no embedded token - the repository is public) and the
+ * update installs the newest release's APK asset through the platform's
+ * own installer.
+ *
+ * The pane is presentational: it renders the [UpdateState] the manager
+ * publishes and the download's [progress], and calls the manager's actions.
+ * The engine (the fetch, the download, the [androidx.core.content.FileProvider]
+ * uri, the install intent, and the "install unknown apps" gate) is
+ * [UpdateManager]; the version ordering and the response parse are the
+ * pure domain in UpdateCheck.kt.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UpdatePane(onBack: () -> Unit) {
+    val context = LocalContext.current
+    // The install + the "install unknown apps" settings are Activity-bound
+    // (startActivity), so the pane hands the activity to the manager's
+    // install action (LocalContext.current is the hosting activity).
+    val activity = context as? Activity
+    val manager = Updates.manager(context)
+    // The area's state (the check result, the download, the install
+    // readiness) + the download's progress.
+    val updateState by manager.state.collectAsState(UpdateState.Idle)
+    val updateProgress by manager.progress.collectAsState(0f)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Update") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { pad ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(pad)
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Current version", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "polex v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // The running build is the version the check compares
+                    // against; the area's live state + the download's
+                    // progress render below it.
+                    UpdateStatus(updateState, updateProgress)
+                }
+            }
+            // Check the releases page for a newer build. It is live except
+            // while a check or a download is in flight and while an APK is
+            // already downloaded and awaiting install (re-checking there
+            // would lose the ready-to-install state, so the Install button
+            // is the live action).
+            Button(
+                onClick = { manager.checkForLatest() },
+                enabled = updateState !is UpdateState.Checking &&
+                    updateState !is UpdateState.Downloading &&
+                    updateState !is UpdateState.ReadyToInstall,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Check for latest version")
+            }
+            // Download the newest release's APK (enabled only while a newer
+            // release is known to exist - the check's UpdateAvailable).
+            Button(
+                onClick = { manager.updateToLatest() },
+                enabled = updateState is UpdateState.UpdateAvailable,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Update to latest")
+            }
+            // Install the downloaded APK (enabled only once the download has
+            // settled ReadyToInstall): gated on the phone's "install unknown
+            // apps" permission, which the engine opens for the user when it
+            // is missing.
+            Button(
+                onClick = { activity?.let { manager.requestInstall(it) } },
+                enabled = updateState is UpdateState.ReadyToInstall && activity != null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Install now")
+            }
+        }
+    }
+}
+
+/**
+ * The "Update" area's status copy for the current [UpdateState]: the plain
+ * result of a check (up to date / an update is available / a failure's
+ * message), the in-flight check, and the download's live progress bar +
+ * percentage.
+ */
+@Composable
+private fun UpdateStatus(state: UpdateState, progress: Float) {
+    val scheme = MaterialTheme.colorScheme
+    when (state) {
+        UpdateState.Idle -> Text(
+            "Check the releases page to see if a newer version is out.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        UpdateState.Checking -> Text(
+            "Checking for a newer version\u2026",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        is UpdateState.UpToDate -> Text(
+            "You're up to date (current version v${state.currentVersion}).",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        is UpdateState.UpdateAvailable -> Text(
+            "Update available: v${state.latestVersion} (you have v${state.currentVersion}).",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        is UpdateState.Downloading -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Downloading v${state.latestVersion}\u2026 ${percent(progress)}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        is UpdateState.ReadyToInstall -> Text(
+            "Downloaded v${state.latestVersion}. Install it to update.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        is UpdateState.Error -> Text(
+            state.message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = scheme.error,
+        )
+    }
+}
+
+/** The download's fraction (0..1) as a percentage label. */
+private fun percent(progress: Float): String = "${(progress.coerceIn(0f, 1f) * 100).toInt()}%"
 
 /** Backend URL editor. */
 @OptIn(ExperimentalMaterial3Api::class)
