@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,17 +13,47 @@ android {
         applicationId = "com.polex.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.4"
+        versionCode = 4
+        versionName = "1.5"
+    }
+
+    // Stable release signing key. The store + its passwords live OUTSIDE
+    // this repo (one permanent key per app: a fresh key per build breaks
+    // in-app updates — INSTALL_FAILED_UPDATE_INCOMPATIBLE). The Docker
+    // build mounts the signing dir at /release and exports the two env
+    // vars below; a local release build exports them at the host paths
+    // (scripts/build-apk.sh does this for the canonical location). If
+    // they are unset or the files are missing, the release variant is
+    // left with an empty signing config and packaging fails loudly
+    // instead of minting a fresh key (the debug variant is unaffected).
+    // Pointer to the key, not the key itself: see "Release signing" in
+    // android/AGENTS.md.
+    signingConfigs {
+        create("release") {
+            val storeFile = System.getenv("POLEX_RELEASE_KEYSTORE")?.let { file(it) }
+            val propsFile = System.getenv("POLEX_RELEASE_KEYSTORE_PROPS")?.let { file(it) }
+            if (storeFile != null && propsFile != null && storeFile.exists() && propsFile.exists()) {
+                val props = Properties()
+                propsFile.inputStream().use { props.load(it) }
+                this.storeFile = storeFile
+                storePassword = props.getProperty("storePassword")
+                    ?: error("keystore.properties is missing storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                    ?: error("keystore.properties is missing keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+                    ?: error("keystore.properties is missing keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Sign release with the debug keystore so the APK installs.
-            // (For distribution beyond your own devices, switch to a
-            // dedicated release keystore via a signingConfigs block.)
-            signingConfig = signingConfigs.getByName("debug")
+            // Signed with the stable polex release key (see signingConfigs
+            // above) — never the debug keystore: the per-build regenerated
+            // debug key made every published release un-updatable on
+            // devices running the previous one.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

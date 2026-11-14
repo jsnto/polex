@@ -257,7 +257,7 @@ docker compose up --build apk        # → android/dist/polex-debug.apk
 
 # ...or use the helper script (docker, or local gradle as fallback/choice):
 #   ./scripts/build-apk.sh             # debug APK (docker)
-#   ./scripts/build-apk.sh release     # release APK (signed w/ debug key) (docker)
+#   ./scripts/build-apk.sh release     # release APK (signed with the stable release key) (docker)
 #   ./scripts/build-apk.sh local debug # local gradle, no docker
 
 # ...or manually:

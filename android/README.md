@@ -93,8 +93,10 @@ cd android
 docker compose up --build apk     # builds debug APK (manual equivalent)
 # → dist/polex-debug.apk
 
-# optional: also/instead build a release APK (signed with the debug key,
-# so it installs; see the signingConfig in app/build.gradle.kts)
+# optional: also/instead build a release APK (signed with the stable
+# polex release key - the one permanent keystore kept outside the repo
+# at /home/jasonto/polex-signing, mounted read-only at /release; see the
+# "release signing" bullet in AGENTS.md)
 TASKS="assembleRelease" docker compose up apk   # → dist/polex-release.apk
 ```
 

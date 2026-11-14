@@ -40,6 +40,18 @@ $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $AndroidDir = Join-Path $Root "android"
 $ApkDir = Join-Path $AndroidDir "dist"
 
+# Stable release signing key (pointer only - the key itself lives OUTSIDE
+# the repo, in the 0700 signing dir; the docker build mounts it at /release
+# via android\docker-compose.yml, the local build exports the two
+# POLEX_RELEASE_* env vars at the host paths). Override the location with
+# $env:POLEX_SIGNING_DIR. Never commit it; never regenerate it.
+$SigningDir = if ($env:POLEX_SIGNING_DIR) { $env:POLEX_SIGNING_DIR } else { "/home/jasonto/polex-signing" }
+
+function Test-SigningKey {
+    (Test-Path (Join-Path $SigningDir "polex-release.jks")) -and
+    (Test-Path (Join-Path $SigningDir "keystore.properties"))
+}
+
 # Source-fingerprint gate, executed INSIDE the freshly built image
 # (identical to the one in scripts\..\build-apk.sh - no single quotes so
 # it can sit in this single-quoted string). Compares the host tree
@@ -76,6 +88,9 @@ function Test-Docker {
 
 if ($Method -eq "docker") {
     Test-Docker
+    if ($Task -eq "release" -and -not (Test-SigningKey)) {
+        throw "ERROR: release signing key not found in $SigningDir (need polex-release.jks + keystore.properties). Set POLEX_SIGNING_DIR to point at it. A release build must never fall back to a fresh key."
+    }
     $gradleTask = if ($Task -eq "debug") { "assembleDebug" } else { "assembleRelease" }
     Write-Host "==> Building APK in container (gradle $gradleTask)" -ForegroundColor Cyan
     Set-Location $AndroidDir
@@ -106,6 +121,15 @@ if ($Method -eq "docker") {
 else {
     if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
         throw "ERROR: need Java 17 for local build (jvmTarget 17)"
+    }
+    if ($Task -eq "release") {
+        if (-not (Test-SigningKey)) {
+            throw "ERROR: release signing key not found in $SigningDir (need polex-release.jks + keystore.properties). Set POLEX_SIGNING_DIR to point at it. A release build must never fall back to a fresh key."
+        }
+        # The docker path gets the same key via the /release bind mount;
+        # the local gradle run reads the env vars instead.
+        if (-not $env:POLEX_RELEASE_KEYSTORE) { $env:POLEX_RELEASE_KEYSTORE = Join-Path $SigningDir "polex-release.jks" }
+        if (-not $env:POLEX_RELEASE_KEYSTORE_PROPS) { $env:POLEX_RELEASE_KEYSTORE_PROPS = Join-Path $SigningDir "keystore.properties" }
     }
     Set-Location $AndroidDir
     if (-not (Test-Path (Join-Path $AndroidDir "gradlew.bat"))) {

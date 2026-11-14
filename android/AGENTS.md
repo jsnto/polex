@@ -10,7 +10,7 @@ entry point (`scripts/build-apk.sh`; from the repo root):
 
 ```sh
 ./scripts/build-apk.sh               # debug APK via docker compose
-./scripts/build-apk.sh release       # release APK (signed with the debug key)
+./scripts/build-apk.sh release       # release APK (stable release key)
 ./scripts/build-apk.sh local debug   # local gradle (needs JDK 17 + wrapper)
 ```
 
@@ -151,12 +151,25 @@ errors. Prefer that over manual runs when verifying app changes.
   AGP 8 API has no `outputFileName`). `scripts/build-apk.sh`, the emulator
   test script and the READMEs all reference these names; don't "clean up"
   the rename block.
-- The **release build is signed with the debug keystore**
-  (`signingConfig = signingConfigs.getByName("debug")` in the release
-  `buildType`). This is intentional so `polex-release.apk` installs on
-  devices — an unsigned release APK fails with a bare "App not installed".
-  Don't remove the signingConfig; for Play Store distribution replace it
-  with a real release keystore.
+- **Release signing — one permanent key, kept OUTSIDE the repo** (pointer
+  only, never committed): the stable polex release keystore lives in
+  `/home/jasonto/polex-signing` on prod480 (0700 dir holding
+  `polex-release.jks` + `keystore.properties`, both 0600; the dir's
+  `README.md` owns the backup/loss rules). The `release` buildType uses a
+  real `signingConfigs` block in `app/build.gradle.kts` that reads the
+  store path from `POLEX_RELEASE_KEYSTORE` and the passwords from
+  `POLEX_RELEASE_KEYSTORE_PROPS`. The Docker build mounts the signing dir
+  read-only at `/release` (`android/docker-compose.yml`; the host location
+  is overridable via `POLEX_SIGNING_DIR`) and exports the in-container
+  paths as those env vars; `scripts/build-apk.sh` (and the Windows mirror)
+  export them at the host paths for `local` release builds and fail a
+  release build early when the key is missing. If the env vars are unset
+  or the files absent, the release variant keeps an empty signing config
+  and packaging fails loudly — it must NEVER fall back to the debug
+  keystore or regenerate a key: the per-build fresh debug key is what made
+  the published v1.3/v1.4 APKs un-updatable on device
+  (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Losing the key orphans every
+  installed app (a re-signed app cannot update over the old one).
 - Android JSON parsing uses `org.json` (built-in); the project does not use
   kotlinx.serialization or Gson — keep it that way unless asked.
 - WorkManager periodic work has a **15-minute minimum interval** — periods
