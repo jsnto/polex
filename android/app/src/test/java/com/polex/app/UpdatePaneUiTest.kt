@@ -84,30 +84,30 @@ class UpdatePaneUiTest {
             val apkBytes = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
             api.downloads[APK_ASSET_NAME] = apkBytes
             api.latestBody = releaseJson(
-                tag = "v1.5",
+                tag = "v1.6",
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
 
             // The pane renders the running build and the unchecked state.
-            compose.onNodeWithText("polex v1.4").assertExists()
+            compose.onNodeWithText("polex v1.5").assertExists()
             compose.onNodeWithText("Check the releases page to see if a newer version is out.").assertIsDisplayed()
 
             // The check fetches the (stand-in) releases page and settles to
-            // an available update: the published v1.5 against the running 1.4.
+            // an available update: the published v1.6 against the running 1.5.
             compose.onNodeWithText("Check for latest version").performClick()
             waitFor("the check to settle to update available") {
-                compose.onNodeWithText("Update available: v1.5 (you have v1.4).").assertIsDisplayed()
+                compose.onNodeWithText("Update available: v1.6 (you have v1.5).").assertIsDisplayed()
             }
 
             // The download streams the asset (the throttled transfer keeps
             // the Downloading state observable), then settles ready.
             compose.onNodeWithText("Update to latest").performClick()
             waitFor("the download to be in flight (the throttled transfer keeps it observable)") {
-                check(compose.onAllNodesWithText("Downloading v1.5", substring = true).fetchSemanticsNodes().isNotEmpty())
+                check(compose.onAllNodesWithText("Downloading v1.6", substring = true).fetchSemanticsNodes().isNotEmpty())
             }
             waitFor("the download to settle ready") {
-                compose.onNodeWithText("Downloaded v1.5. Install it to update.").assertIsDisplayed()
+                compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertIsDisplayed()
             }
 
             // The APK landed on disk with the asset's exact bytes, and the
@@ -174,8 +174,8 @@ class UpdatePaneUiTest {
             openUpdatePane(routingClient(api.port))
 
             compose.onNodeWithText("Check for latest version").performClick()
-            waitFor("the check to settle up to date (the published v1.2 is older than the running 1.4)") {
-                compose.onNodeWithText("You're up to date (current version v1.4).").assertIsDisplayed()
+            waitFor("the check to settle up to date (the published v1.2 is older than the running 1.5)") {
+                compose.onNodeWithText("You're up to date (current version v1.5).").assertIsDisplayed()
             }
             // No update to take: the download and install actions stay
             // disabled.
@@ -185,7 +185,7 @@ class UpdatePaneUiTest {
             // The menu row's live subtitle says the same once back on the menu.
             compose.onNodeWithContentDescription("Back").performClick()
             waitFor("the menu row to show the up-to-date state") {
-                compose.onNodeWithText("Up to date (v1.4)").assertExists()
+                compose.onNodeWithText("Up to date (v1.5)").assertExists()
             }
         } finally {
             api.stop()
@@ -225,14 +225,14 @@ class UpdatePaneUiTest {
         val api = FakeReleasesApi().also { it.start() }
         try {
             api.latestBody = releaseJson(
-                tag = "v1.5",
+                tag = "v1.6",
                 assets = listOf(asset("release-notes.txt", "http://127.0.0.1:${api.port}/download/release-notes.txt")),
             )
             openUpdatePane(routingClient(api.port))
 
             compose.onNodeWithText("Check for latest version").performClick()
             waitFor("the check to report the update (the release has no APK asset)") {
-                compose.onNodeWithText("Update available: v1.5 (you have v1.4).").assertIsDisplayed()
+                compose.onNodeWithText("Update available: v1.6 (you have v1.5).").assertIsDisplayed()
             }
             compose.onNodeWithText("Update to latest").performClick()
             waitFor("the refusal message") {

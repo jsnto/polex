@@ -100,7 +100,9 @@ ADDR=":9000" CHECK_INTERVAL=5s ./scripts/start-backend.sh
                                       # (forces a fresh image: down -v + --no-cache,
                                       #  verifies the in-image source fingerprint
                                       #  before compiling — don't skip it)
-./scripts/build-apk.sh release        # release APK (signed with the debug key)
+./scripts/build-apk.sh release        # release APK (signed with the stable
+                                      # release key - one permanent keystore
+                                      # kept outside the repo)
 ./scripts/build-apk.sh local debug    # local gradle (needs JDK 17)
 
 ./scripts/test-emulator.sh            # emulator smoke test (needs /dev/kvm)
