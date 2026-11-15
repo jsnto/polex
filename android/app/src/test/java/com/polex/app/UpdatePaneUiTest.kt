@@ -247,7 +247,7 @@ class UpdatePaneUiTest {
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
-            driveToReadyToInstall(activity)
+            driveToReadyToInstall()
 
             // Only the LEGACY action has a target activity on this device
             // (the modern one does not resolve - the Pixel 7 Pro round).
@@ -285,7 +285,7 @@ class UpdatePaneUiTest {
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
-            driveToReadyToInstall(activity)
+            driveToReadyToInstall()
 
             // Neither action has a target activity on this device (unlike
             // the tests above, nothing is registered to resolve either).
@@ -331,7 +331,7 @@ class UpdatePaneUiTest {
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
-            driveToReadyToInstall(activity)
+            driveToReadyToInstall()
             shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
 
             // The engine's installer launch route (production: MainActivity
@@ -396,7 +396,7 @@ class UpdatePaneUiTest {
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
-            driveToReadyToInstall(activity)
+            driveToReadyToInstall()
             shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
 
             // The engine's installer launch route (see the rejected-install
@@ -442,7 +442,7 @@ class UpdatePaneUiTest {
                 assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
             )
             val activity = openUpdatePane(routingClient(api.port))
-            driveToReadyToInstall(activity)
+            driveToReadyToInstall()
             shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
 
             // The engine's installer launch route (see the rejected-install
@@ -564,7 +564,7 @@ class UpdatePaneUiTest {
      * Drives the real pane to ReadyToInstall (check → the published v1.6
      * is newer than the running v1.5 → the streamed download settles).
      */
-    private fun driveToReadyToInstall(activity: android.app.Activity) {
+    private fun driveToReadyToInstall() {
         compose.onNodeWithText("Check for latest version").performClick()
         waitFor("the check to settle to update available") {
             compose.onNodeWithText("Update available: v1.6 (you have v1.5).").assertIsDisplayed()
