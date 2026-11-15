@@ -1,8 +1,14 @@
 package com.polex.app
 
+import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.Context
+import androidx.core.content.FileProvider
+import androidx.activity.result.ActivityResult
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -64,12 +70,35 @@ class UpdatePaneUiTest {
         val prefs = compose.activity.getSharedPreferences("polex", Context.MODE_PRIVATE)
         prefs.edit().putString("baseUrl", "http://127.0.0.1:1").putString("authToken", "tok123").commit()
         Api.authToken = "tok123"
+        // The shadow's REQUEST_INSTALL_PACKAGES state leaks across tests in
+        // this JVM: reset it to the real default (permission OFF) so each
+        // test starts from a clean device.
+        shadowOf(compose.activity.packageManager).setCanRequestPackageInstalls(false)
+        // androidx.core's FileProvider caches its parsed <paths> strategies in
+        // a STATIC per-authority map (process-wide across tests). Each test
+        // gets a fresh Robolectric data directory, so the previous test's
+        // cached strategy points at a stale filesDir and
+        // FileProvider.getUriForFile throws "Failed to find configured root"
+        // (the install then silently bails out). Clear the cache so each
+        // test parses its own data directory fresh.
+        @Suppress("UNCHECKED_CAST")
+        (FileProvider::class.java.getDeclaredField("sCache").also { it.isAccessible = true }
+            .get(null) as MutableMap<Any?, Any?>).clear()
     }
 
     @After
     fun tearDown() {
         Updates.installForTests(null)
         Api.authToken = null
+        // The shadow PM's install-settings intent-filter store is STATIC
+        // (process-wide across tests): drop whatever this test registered
+        // so the next test's resolver check sees a clean device. The
+        // shadow throws when the component was never registered (a test
+        // that never reached the settings step), so the reset is best-effort.
+        runCatching {
+            shadowOf(compose.activity.packageManager)
+                .clearIntentFilterForActivity(SETTINGS_COMPONENT)
+        }
     }
 
     // ------------------------------------------------------------------
@@ -122,22 +151,29 @@ class UpdatePaneUiTest {
 
             // The permission is still off: tapping Install explains the
             // requirement and opens the phone's own "install unknown apps"
-            // screen for this app (the download is kept).
+            // screen for this app (the download is kept). The modern
+            // per-app action RESOLVES on this default device, so the
+            // engine opens it (a device where it does not take the legacy
+            // fallback - see the dedicated test below).
+            resolveSettingsAction(activity, INSTALL_SETTINGS_ACTION_MODERN)
             compose.onNodeWithText("Install now").performClick()
             waitFor("the install-settings intent to launch") {
                 checkNotNull(shadowOf(activity).peekNextStartedActivity())
             }
             val settingsIntent = shadowOf(activity).getNextStartedActivity()
-            check(settingsIntent.action == ACTION_MANAGE_APP_INSTALL_SETTINGS) {
+            check(settingsIntent.action == INSTALL_SETTINGS_ACTION_MODERN) {
                 "the engine must open the phone's install-settings screen, got ${settingsIntent.action}"
             }
             check(settingsIntent.dataString == "package:com.polex.app") {
                 "the install-settings screen must be the one for this app, got ${settingsIntent.dataString}"
             }
-
             // The user grants the permission and comes back: the activity's
             // onResume hook (the engine's own return path) launches the
-            // installer over the kept APK's FileProvider uri.
+            // installer over the kept APK's FileProvider uri. (No ActivityResult
+            // route is registered in this test, so the engine takes its
+            // documented fire-and-forget fallback - the recorded intent is
+            // what the assertions target; the installer's RESULT handling is
+            // covered by the dedicated tests below.)
             shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
             manager.onActivityResumed(activity)
             val installIntent = shadowOf(activity).getNextStartedActivity()
@@ -193,10 +229,200 @@ class UpdatePaneUiTest {
     }
 
     // ------------------------------------------------------------------
+    // The device-round defect 1: on the Pixel 7 Pro the modern per-app
+    // settings action does NOT resolve (its launch logged "unable to
+    // resolve Intent") while the LEGACY action opens the same per-app
+    // page. The engine must fall back to the legacy one, so the page
+    // actually opens instead of silently no-op'ing.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aLegacySettingsActionOpensWhenTheModernOneDoesNotResolve() {
+        val api = FakeReleasesApi().also { it.start() }
+        try {
+            api.downloads[APK_ASSET_NAME] = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
+            api.latestBody = releaseJson(
+                tag = "v1.6",
+                assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
+            )
+            val activity = openUpdatePane(routingClient(api.port))
+            driveToReadyToInstall(activity)
+
+            // Only the LEGACY action has a target activity on this device
+            // (the modern one does not resolve - the Pixel 7 Pro round).
+            resolveSettingsAction(activity, INSTALL_SETTINGS_ACTION_LEGACY)
+
+            compose.onNodeWithText("Install now").performClick()
+            waitFor("the install-settings intent to launch") {
+                checkNotNull(shadowOf(activity).peekNextStartedActivity())
+            }
+            val settingsIntent = shadowOf(activity).getNextStartedActivity()
+            check(settingsIntent.action == INSTALL_SETTINGS_ACTION_LEGACY) {
+                "the modern action does not resolve here, so the legacy action must open the page, got ${settingsIntent.action}"
+            }
+            check(settingsIntent.dataString == "package:com.polex.app") {
+                "the legacy page must be the one for this app, got ${settingsIntent.dataString}"
+            }
+        } finally {
+            api.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The device-round defect 2: the platform REJECTS the install (the
+    // v1.3 -> v1.4 signature mismatch, INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+    // The rejection must surface the concrete failure + the remedy - the
+    // pane must NOT idle at "Ready to install".
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aRejectedInstallSurfacesThePlatformFailureInsteadOfIdling() {
+        val api = FakeReleasesApi().also { it.start() }
+        try {
+            api.downloads[APK_ASSET_NAME] = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
+            api.latestBody = releaseJson(
+                tag = "v1.6",
+                assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
+            )
+            val activity = openUpdatePane(routingClient(api.port))
+            driveToReadyToInstall(activity)
+            shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
+
+            // The engine's installer launch route (production: MainActivity
+            // registers the ActivityResult launcher on the engine; here a
+            // stand-in route that records the launch so the test asserts
+            // the intent and then delivers the installer's RESULT exactly
+            // as the launcher's callback would).
+            var launched: Intent? = null
+            manager.installLaunchRoute = { intent -> launched = intent }
+
+            compose.onNodeWithText("Install now").performClick()
+            waitFor("the installer to launch through the route") {
+                checkNotNull(launched)
+            }
+            check(launched!!.type == "application/vnd.android.package-archive") {
+                "the installer intent must type the APK, got ${launched?.type}"
+            }
+            check(launched!!.dataString!!.startsWith("content://com.polex.app.update.fileprovider/")) {
+                "the installer intent must carry the FileProvider uri, got ${launched?.dataString}"
+            }
+
+            // The platform rejects it (the rounds' exact failure). The
+            // platform delivers a rejected install with a CANCELED-style
+            // result + the failure code as a data extra (the product's own
+            // extra literal - the platform's EXTRA_FAILED_REQUEST, absent
+            // from the compile stubs). The launcher's callback delivers it
+            // to the engine:
+            manager.onInstallResult(
+                ActivityResult(
+                    Activity.RESULT_CANCELED,
+                    Intent().putExtra(INSTALLER_FAILED_REQUEST_EXTRA, "INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
+                ),
+            )
+
+            // The concrete failure + the remedy must be on screen, and the
+            // pane must have left "Ready to install".
+            waitFor("the rejection to surface its concrete failure") {
+                compose.onNodeWithText("INSTALL_FAILED_UPDATE_INCOMPATIBLE", substring = true).assertIsDisplayed()
+            }
+            compose.onNodeWithText("Uninstall the current PoleX", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertDoesNotExist()
+            compose.onNodeWithText("Install now").assertIsNotEnabled()
+        } finally {
+            api.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The install SUCCEEDS: the pane settles to its installed copy (not an
+    // idle at "Ready to install"), and the actions stay quiet until the
+    // app restarts into the new build.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aSuccessfulInstallSettlesThePaneInstalled() {
+        val api = FakeReleasesApi().also { it.start() }
+        try {
+            api.downloads[APK_ASSET_NAME] = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
+            api.latestBody = releaseJson(
+                tag = "v1.6",
+                assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
+            )
+            val activity = openUpdatePane(routingClient(api.port))
+            driveToReadyToInstall(activity)
+            shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
+
+            // The engine's installer launch route (see the rejected-install
+            // test's note): records the launch, then delivers the RESULT.
+            var launched: Intent? = null
+            manager.installLaunchRoute = { intent -> launched = intent }
+
+            compose.onNodeWithText("Install now").performClick()
+            waitFor("the installer to launch through the route") {
+                checkNotNull(launched)
+            }
+
+            // The install succeeded: the launcher's callback delivers
+            // RESULT_OK to the engine.
+            manager.onInstallResult(ActivityResult(Activity.RESULT_OK, null))
+
+            waitFor("the success to settle the pane installed") {
+                compose.onNodeWithText("Installed v1.6", substring = true).assertIsDisplayed()
+            }
+            compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertDoesNotExist()
+            // The installed build only runs after a restart: re-checking in
+            // this OLD process would just re-offer what was just installed.
+            compose.onNodeWithText("Install now").assertIsNotEnabled()
+            compose.onNodeWithText("Check for latest version").assertIsNotEnabled()
+            compose.onNodeWithText("Update to latest").assertIsNotEnabled()
+        } finally {
+            api.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The user dismisses the installer (back): not a failure - the pane
+    // stays at "Ready to install" and the Install button is the retry.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aDismissedInstallerKeepsTheRetryPath() {
+        val api = FakeReleasesApi().also { it.start() }
+        try {
+            api.downloads[APK_ASSET_NAME] = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
+            api.latestBody = releaseJson(
+                tag = "v1.6",
+                assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
+            )
+            val activity = openUpdatePane(routingClient(api.port))
+            driveToReadyToInstall(activity)
+            shadowOf(activity.packageManager).setCanRequestPackageInstalls(true)
+
+            // The engine's installer launch route (see the rejected-install
+            // test's note): records the launch, then delivers the RESULT.
+            var launched: Intent? = null
+            manager.installLaunchRoute = { intent -> launched = intent }
+
+            compose.onNodeWithText("Install now").performClick()
+            waitFor("the installer to launch through the route") {
+                checkNotNull(launched)
+            }
+
+            // The user dismissed the installer (back): the launcher's
+            // callback delivers a RESULT_CANCELED with NO failure extra.
+            manager.onInstallResult(ActivityResult(Activity.RESULT_CANCELED, null))
+
+            compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertIsDisplayed()
+            compose.onNodeWithText("Install now").assertIsEnabled()
+        } finally {
+            api.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
     // No published release exists: the GitHub API answers 404 for
     // /releases/latest - its own plain message, not a crash.
     // ------------------------------------------------------------------
-
     @Test
     fun noPublishedReleasesSurfacesThePlainMessage() {
         val api = FakeReleasesApi().also { it.start() }
@@ -285,6 +511,33 @@ class UpdatePaneUiTest {
             compose.onNodeWithText("Current version").assertIsDisplayed()
         }
         return compose.activity
+    }
+
+    /**
+     * Drives the real pane to ReadyToInstall (check → the published v1.6
+     * is newer than the running v1.5 → the streamed download settles).
+     */
+    private fun driveToReadyToInstall(activity: android.app.Activity) {
+        compose.onNodeWithText("Check for latest version").performClick()
+        waitFor("the check to settle to update available") {
+            compose.onNodeWithText("Update available: v1.6 (you have v1.5).").assertIsDisplayed()
+        }
+        compose.onNodeWithText("Update to latest").performClick()
+        waitFor("the download to settle ready") {
+            compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertIsDisplayed()
+        }
+    }
+
+    /**
+     * Makes [action] RESOLVE on the shadow device: registers a settings
+     * activity + an intent filter for it (the engine's resolver check is
+     * the real packageManager.queryIntentActivities, so this is the same
+     * shape as a device where the platform has a target for the action).
+     */
+    private fun resolveSettingsAction(activity: android.app.Activity, action: String) {
+        val shadowPm = shadowOf(activity.packageManager)
+        shadowPm.addActivityIfNotPresent(SETTINGS_COMPONENT)
+        shadowPm.addIntentFilterForActivity(SETTINGS_COMPONENT, IntentFilter(action))
     }
 
     /**
@@ -438,6 +691,7 @@ class UpdatePaneUiTest {
     private companion object {
         const val APK_ASSET_NAME = "polex-release.apk"
         const val APK_SIZE_BYTES = 1024 * 1024
-        const val ACTION_MANAGE_APP_INSTALL_SETTINGS = "android.settings.MANAGE_APP_INSTALL_SETTINGS"
+        /** The fake "settings" activity the install-settings actions resolve to. */
+        val SETTINGS_COMPONENT = ComponentName("com.android.settings", "com.android.settings.Settings")
     }
 }

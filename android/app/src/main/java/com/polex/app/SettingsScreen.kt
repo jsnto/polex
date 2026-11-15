@@ -264,6 +264,7 @@ private fun UpdateState.subtitle(): String = when (this) {
     is UpdateState.UpdateAvailable -> "Update available: v$latestVersion"
     is UpdateState.Downloading -> "Downloading v$latestVersion…"
     is UpdateState.ReadyToInstall -> "v$latestVersion ready to install"
+    is UpdateState.Installed -> "v$latestVersion installed - restart the app"
     is UpdateState.Error -> "Check for updates"
 }
 
@@ -335,12 +336,15 @@ private fun UpdatePane(onBack: () -> Unit) {
             // while a check or a download is in flight and while an APK is
             // already downloaded and awaiting install (re-checking there
             // would lose the ready-to-install state, so the Install button
-            // is the live action).
+            // is the live action) or already installed (this process is the
+            // OLD build; re-checking would just re-offer what was just
+            // installed — restart the app instead).
             Button(
                 onClick = { manager.checkForLatest() },
                 enabled = updateState !is UpdateState.Checking &&
                     updateState !is UpdateState.Downloading &&
-                    updateState !is UpdateState.ReadyToInstall,
+                    updateState !is UpdateState.ReadyToInstall &&
+                    updateState !is UpdateState.Installed,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Check for latest version")
@@ -357,7 +361,11 @@ private fun UpdatePane(onBack: () -> Unit) {
             // Install the downloaded APK (enabled only once the download has
             // settled ReadyToInstall): gated on the phone's "install unknown
             // apps" permission, which the engine opens for the user when it
-            // is missing.
+            // is missing. The launch goes through the activity's registered
+            // ActivityResult route (the engine's installLaunchRoute, set in
+            // MainActivity.onCreate), so a rejected install surfaces the
+            // platform's failure (the engine's onInstallResult) instead of
+            // idling here.
             Button(
                 onClick = { activity?.let { manager.requestInstall(it) } },
                 enabled = updateState is UpdateState.ReadyToInstall && activity != null,
@@ -407,6 +415,10 @@ private fun UpdateStatus(state: UpdateState, progress: Float) {
         }
         is UpdateState.ReadyToInstall -> Text(
             "Downloaded v${state.latestVersion}. Install it to update.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        is UpdateState.Installed -> Text(
+            "Installed v${state.latestVersion}. Close the app and reopen it to run the new version.",
             style = MaterialTheme.typography.bodyMedium,
         )
         is UpdateState.Error -> Text(

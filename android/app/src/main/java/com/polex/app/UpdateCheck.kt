@@ -75,6 +75,75 @@ fun pickApkAsset(release: LatestRelease): ReleaseAsset? =
     release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
 
 /**
+ * `android.provider.Settings.ACTION_MANAGE_APP_INSTALL_SETTINGS` (API 30+):
+ * the per-app "install unknown apps" settings page. The pruned compile stub
+ * omits that `Settings` constant, so the literal value the platform uses.
+ */
+const val INSTALL_SETTINGS_ACTION_MODERN = "android.settings.MANAGE_APP_INSTALL_SETTINGS"
+
+/**
+ * `android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES` (API 23+,
+ * legacy): the "install unknown apps" settings action. With a `package:`
+ * data uri it opens the same per-app page on newer builds. The pruned
+ * compile stub omits that `Settings` constant, so the literal value the
+ * platform uses.
+ */
+const val INSTALL_SETTINGS_ACTION_LEGACY = "android.settings.MANAGE_UNKNOWN_APP_SOURCES"
+
+/**
+ * The "install unknown apps" settings action to open, chosen from the two
+ * actions the platform offers by which of them actually RESOLVE on this
+ * device (the caller's resolver check against the package manager): the
+ * modern per-app action when it resolves, the legacy action when it does
+ * not (some newer builds have no target activity for the modern action —
+ * the Pixel 7 Pro round logged `unable to resolve Intent` for it while the
+ * legacy action opened the same page), and `null` when neither resolves
+ * (the caller must then explain the requirement in a plain message instead
+ * of launching a dead intent).
+ */
+fun pickInstallSettingsAction(modernResolves: Boolean, legacyResolves: Boolean): String? =
+    when {
+        modernResolves -> INSTALL_SETTINGS_ACTION_MODERN
+        legacyResolves -> INSTALL_SETTINGS_ACTION_LEGACY
+        else -> null
+    }
+
+/**
+ * Maps the platform installer's rejection onto plain user-facing copy:
+ * names the concrete platform failure ([rawFailure] — the installer result's
+ * `EXTRA_FAILED_REQUEST` extra, e.g. `INSTALL_FAILED_UPDATE_INCOMPATIBLE`)
+ * and says what to do about it. An unknown or missing failure still says
+ * the install was rejected (and how to retry) — a rejection is never
+ * silently swallowed.
+ */
+fun installFailureMessage(rawFailure: String?): String {
+    val code = rawFailure?.trim()?.ifEmpty { null }
+    return when (code) {
+        "INSTALL_FAILED_UPDATE_INCOMPATIBLE" ->
+            "Android rejected the install (INSTALL_FAILED_UPDATE_INCOMPATIBLE): this APK is " +
+                "signed with a different key than the PoleX that is installed. Uninstall the " +
+                "current PoleX, then install this one again."
+        "INSTALL_FAILED_USER_RESTRICTED" ->
+            "Android rejected the install (INSTALL_FAILED_USER_RESTRICTED): the phone's " +
+                "settings block installs from this app. Allow \"Install unknown apps\" for " +
+                "PoleX again, then tap Install."
+        "INSTALL_FAILED_NO_STORAGE",
+        "INSTALL_FAILED_INSUFFICIENT_STORAGE",
+        ->
+            "Android rejected the install: the phone has no storage left for it. Free up " +
+                "space, then tap Install again."
+        "INSTALL_PARSE_FAILED_NO_CERTIFICATES",
+        "INSTALL_PARSE_FAILED_NO_CERT",
+        ->
+            "Android rejected the install: the APK is damaged or not signed. Download the " +
+                "APK again, then install it."
+        else ->
+            "Android rejected the install" + (code?.let { " ($it)" } ?: "") +
+                ". Tap Install to try again; if it keeps failing, download the APK again."
+    }
+}
+
+/**
  * The settings "Update" area's lifecycle. From an unchecked [Idle], a check
  * settles to [UpToDate] (the running build is the newest) or
  * [UpdateAvailable] (a newer release exists and can be downloaded); the
@@ -105,6 +174,12 @@ sealed class UpdateState {
 
     /** [latestVersion] is downloaded to [apkPath]; install it to update. */
     data class ReadyToInstall(val latestVersion: String, val apkPath: String) : UpdateState()
+
+    /**
+     * [latestVersion] is installed through the platform installer (its
+     * RESULT was OK); the APK is in and restarting the app runs it.
+     */
+    data class Installed(val latestVersion: String) : UpdateState()
 
     /** A step failed; [message] is the plain user-facing copy. */
     data class Error(val message: String) : UpdateState()
