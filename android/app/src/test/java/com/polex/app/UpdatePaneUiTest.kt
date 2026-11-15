@@ -28,6 +28,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowPackageManager
+import org.robolectric.shadows.ShadowToast
 import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -263,6 +264,51 @@ class UpdatePaneUiTest {
             check(settingsIntent.dataString == "package:com.polex.app") {
                 "the legacy page must be the one for this app, got ${settingsIntent.dataString}"
             }
+        } finally {
+            api.stop()
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Defect 1's boundary: neither the modern nor the legacy action
+    // resolves on this device - the engine must not launch a dead intent
+    // and must explain the requirement in plain copy instead.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aPlainMessageExplainsThePermissionWhenNoSettingsActionResolves() {
+        val api = FakeReleasesApi().also { it.start() }
+        try {
+            api.downloads[APK_ASSET_NAME] = ByteArray(APK_SIZE_BYTES) { (it % 251).toByte() }
+            api.latestBody = releaseJson(
+                tag = "v1.6",
+                assets = listOf(asset(APK_ASSET_NAME, "http://127.0.0.1:${api.port}/download/$APK_ASSET_NAME")),
+            )
+            val activity = openUpdatePane(routingClient(api.port))
+            driveToReadyToInstall(activity)
+
+            // Neither action has a target activity on this device (unlike
+            // the tests above, nothing is registered to resolve either).
+            compose.onNodeWithText("Install now").performClick()
+            waitFor("the plain permission message to be shown") {
+                checkNotNull(ShadowToast.getTextOfLatestToast())
+            }
+            // The plain message names the requirement and where to FIND it
+            // (no settings page could be opened for the user):
+            val toast = checkNotNull(ShadowToast.getTextOfLatestToast())
+            check(toast.contains("Install unknown apps")) {
+                "the plain message must name the requirement, got: $toast"
+            }
+            check(toast.contains("Find")) {
+                "with no resolvable action the message must say where to find the setting, got: $toast"
+            }
+            // ... and no dead intent was launched (the download is kept and
+            // the Install button stays the retry path):
+            check(shadowOf(activity).peekNextStartedActivity() == null) {
+                "no settings intent may launch when neither action resolves"
+            }
+            compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertIsDisplayed()
+            compose.onNodeWithText("Install now").assertIsEnabled()
         } finally {
             api.stop()
         }

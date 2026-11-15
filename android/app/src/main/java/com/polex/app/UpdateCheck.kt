@@ -156,8 +156,13 @@ fun installFailureMessage(rawFailure: String?): String {
  * [UpdateAvailable] (a newer release exists and can be downloaded); the
  * download runs through [Downloading] (with a separate progress flow) to
  * [ReadyToInstall] (the APK is on disk, ready for the platform installer);
- * any step can settle to [Error] with a plain user-facing message (a
- * network failure, no published release, or no APK asset).
+ * the install settles to [Installed] when the platform installer's result
+ * is OK (the new version runs once the app restarts) and to [Error] with
+ * the concrete failure and the remedy ([installFailureMessage]) when the
+ * platform rejects it (the user's own dismissal keeps [ReadyToInstall] —
+ * the Install button is the retry). Any other step can settle to [Error]
+ * with a plain user-facing message (a network failure, no published
+ * release, or no APK asset).
  */
 sealed class UpdateState {
     /** No check has been made yet. */
