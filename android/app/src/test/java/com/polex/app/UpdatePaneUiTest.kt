@@ -325,7 +325,8 @@ class UpdatePaneUiTest {
             waitFor("the rejection to surface its concrete failure") {
                 compose.onNodeWithText("INSTALL_FAILED_UPDATE_INCOMPATIBLE", substring = true).assertIsDisplayed()
             }
-            compose.onNodeWithText("Uninstall the current PoleX", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("Uninstall PoleX", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("https://github.com/jsnto/polex/releases", substring = true).assertIsDisplayed()
             compose.onNodeWithText("Downloaded v1.6. Install it to update.").assertDoesNotExist()
             compose.onNodeWithText("Install now").assertIsNotEnabled()
         } finally {

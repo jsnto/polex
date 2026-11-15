@@ -112,34 +112,41 @@ fun pickInstallSettingsAction(modernResolves: Boolean, legacyResolves: Boolean):
  * Maps the platform installer's rejection onto plain user-facing copy:
  * names the concrete platform failure ([rawFailure] — the installer result's
  * `EXTRA_FAILED_REQUEST` extra, e.g. `INSTALL_FAILED_UPDATE_INCOMPATIBLE`)
- * and says what to do about it. An unknown or missing failure still says
- * the install was rejected (and how to retry) — a rejection is never
- * silently swallowed.
+ * and says what to do about it. The remedies name only the actions that are
+ * live from the error state the rejection settles into — the pane's "Check
+ * for latest version" -> "Update to latest" -> "Install now" path ("Install
+ * now" going live once the re-download lands ReadyToInstall); the
+ * signature-mismatch remedy instead points at the release page, because the
+ * staged APK sits in the app's private storage and dies with the uninstall
+ * it asks for. An unknown or missing failure still says the install was
+ * rejected (and how to retry) — a rejection is never silently swallowed.
  */
 fun installFailureMessage(rawFailure: String?): String {
     val code = rawFailure?.trim()?.ifEmpty { null }
     return when (code) {
         "INSTALL_FAILED_UPDATE_INCOMPATIBLE" ->
             "Android rejected the install (INSTALL_FAILED_UPDATE_INCOMPATIBLE): this APK is " +
-                "signed with a different key than the PoleX that is installed. Uninstall the " +
-                "current PoleX, then install this one again."
+                "signed with a different key than the PoleX that is installed. Uninstall PoleX, " +
+                "then download the new APK from the release page " +
+                "(https://github.com/jsnto/polex/releases) and install it."
         "INSTALL_FAILED_USER_RESTRICTED" ->
             "Android rejected the install (INSTALL_FAILED_USER_RESTRICTED): the phone's " +
                 "settings block installs from this app. Allow \"Install unknown apps\" for " +
-                "PoleX again, then tap Install."
+                "PoleX, then tap Check for latest version, Update to latest, and Install now."
         "INSTALL_FAILED_NO_STORAGE",
         "INSTALL_FAILED_INSUFFICIENT_STORAGE",
         ->
-            "Android rejected the install: the phone has no storage left for it. Free up " +
-                "space, then tap Install again."
+            "Android rejected the install: the phone has no storage left. Free up space, then " +
+                "tap Check for latest version, Update to latest, and Install now."
         "INSTALL_PARSE_FAILED_NO_CERTIFICATES",
         "INSTALL_PARSE_FAILED_NO_CERT",
         ->
-            "Android rejected the install: the APK is damaged or not signed. Download the " +
-                "APK again, then install it."
+            "Android rejected the install: the downloaded APK is damaged or not signed. Tap " +
+                "Check for latest version, then Update to latest to download it again, and " +
+                "Install now."
         else ->
             "Android rejected the install" + (code?.let { " ($it)" } ?: "") +
-                ". Tap Install to try again; if it keeps failing, download the APK again."
+                ". Tap Check for latest version, then Update to latest and Install now to try again."
     }
 }
 

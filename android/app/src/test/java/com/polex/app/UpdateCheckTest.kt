@@ -219,6 +219,10 @@ class UpdateCheckTest {
             "the remedy must tell the user to uninstall the current app first, got: $message",
             message.contains("Uninstall"),
         )
+        assertTrue(
+            "the remedy must point at the release page (the staged APK dies with the uninstall), got: $message",
+            message.contains("https://github.com/jsnto/polex/releases"),
+        )
     }
 
     @Test
@@ -232,6 +236,10 @@ class UpdateCheckTest {
             "the remedy must re-point at the install permission, got: $message",
             message.contains("Install unknown apps"),
         )
+        assertTrue(
+            "the retry must start at the action live from the error state, got: $message",
+            message.contains("Check for latest version"),
+        )
     }
 
     @Test
@@ -239,7 +247,7 @@ class UpdateCheckTest {
         for (code in listOf("INSTALL_FAILED_NO_STORAGE", "INSTALL_FAILED_INSUFFICIENT_STORAGE")) {
             val message = installFailureMessage(code)
             assertTrue("free-up-space remedy missing for $code, got: $message", message.contains("storage"))
-            assertTrue("retry path missing for $code, got: $message", message.contains("Install"))
+            assertTrue("retry path missing for $code, got: $message", message.contains("Check for latest version"))
         }
     }
 
@@ -247,7 +255,7 @@ class UpdateCheckTest {
     fun `a damaged-or-unsigned apk rejection says to re-download`() {
         for (code in listOf("INSTALL_PARSE_FAILED_NO_CERTIFICATES", "INSTALL_PARSE_FAILED_NO_CERT")) {
             val message = installFailureMessage(code)
-            assertTrue("re-download remedy missing for $code, got: $message", message.contains("Download"))
+            assertTrue("re-download remedy missing for $code, got: $message", message.contains("Update to latest"))
         }
     }
 
@@ -256,14 +264,14 @@ class UpdateCheckTest {
         val message = installFailureMessage("INSTALL_FAILED_SOMETHING_NEW")
         assertTrue("the rejection must be said, got: $message", message.contains("rejected"))
         assertTrue("the code must be carried, got: $message", message.contains("INSTALL_FAILED_SOMETHING_NEW"))
-        assertTrue("a retry must be offered, got: $message", message.contains("Install"))
+        assertTrue("a retry must be offered, got: $message", message.contains("Check for latest version"))
     }
 
     @Test
     fun `a failure with no code still surfaces the rejection`() {
         val message = installFailureMessage(null)
         assertTrue("the rejection must be said, got: $message", message.contains("rejected"))
-        assertTrue("a retry must be offered, got: $message", message.contains("Install"))
+        assertTrue("a retry must be offered, got: $message", message.contains("Check for latest version"))
     }
 
     @Test
