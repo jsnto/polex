@@ -62,7 +62,12 @@ screen widget.
   - **Update** — the app's self-update (there is no store — the app is
     sideloaded): check the app's own public GitHub releases for a newer
     version, download the newest release's APK, and install it through the
-    phone's own installer (one-time "install unknown apps" permission).
+    phone's own installer (one-time "install unknown apps" permission). A
+    successful install settles the pane to "Installed vX — close the app
+    and reopen it to run the new version"; a platform rejection surfaces
+    the concrete failure and a remedy (a signature mismatch — an APK signed
+    with a different key — says to uninstall PoleX and install the new APK
+    from the [release page](https://github.com/jsnto/polex/releases)).
 - **Home screen widget** (Glance) — at-a-glance 1×1 or 2×1 (2 wide,
   1 tall) tile: a colored
   `N/M UP` + `updated HH:mm` hero over a dot + name server grid — two

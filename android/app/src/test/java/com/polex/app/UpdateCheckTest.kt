@@ -175,6 +175,110 @@ class UpdateCheckTest {
         assertNull(pickApkAsset(parseLatestRelease("""{"tag_name":"v1.4"}""")))
     }
 
+    // ---- pickInstallSettingsAction (the resolver fallback selection) ----
+
+    @Test
+    fun `the modern settings action is picked when it resolves`() {
+        assertEquals(
+            INSTALL_SETTINGS_ACTION_MODERN,
+            pickInstallSettingsAction(true, true),
+        )
+        assertEquals(
+            INSTALL_SETTINGS_ACTION_MODERN,
+            pickInstallSettingsAction(true, false),
+        )
+    }
+
+    @Test
+    fun `the legacy settings action is picked when the modern one does not resolve`() {
+        // The Pixel 7 Pro device round: the modern action has no target
+        // activity on that build (its launch logged "unable to resolve
+        // Intent") while the legacy one opened the same per-app page.
+        assertEquals(
+            INSTALL_SETTINGS_ACTION_LEGACY,
+            pickInstallSettingsAction(false, true),
+        )
+    }
+
+    @Test
+    fun `no settings action when neither resolves`() {
+        assertNull(pickInstallSettingsAction(false, false))
+    }
+
+    // ---- installFailureMessage (a rejected install is surfaced) ----
+
+    @Test
+    fun `an incompatible-signature rejection names the failure and the fix`() {
+        // The exact v1.3 -> v1.4 failure from the device rounds.
+        val message = installFailureMessage("INSTALL_FAILED_UPDATE_INCOMPATIBLE")
+        assertTrue(
+            "the concrete platform failure must be named, got: $message",
+            message.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
+        )
+        assertTrue(
+            "the remedy must tell the user to uninstall the current app first, got: $message",
+            message.contains("Uninstall"),
+        )
+        assertTrue(
+            "the remedy must point at the release page (the staged APK dies with the uninstall), got: $message",
+            message.contains("https://github.com/jsnto/polex/releases"),
+        )
+    }
+
+    @Test
+    fun `a user-restricted rejection points back at the permission`() {
+        val message = installFailureMessage("INSTALL_FAILED_USER_RESTRICTED")
+        assertTrue(
+            "the concrete platform failure must be named, got: $message",
+            message.contains("INSTALL_FAILED_USER_RESTRICTED"),
+        )
+        assertTrue(
+            "the remedy must re-point at the install permission, got: $message",
+            message.contains("Install unknown apps"),
+        )
+        assertTrue(
+            "the retry must start at the action live from the error state, got: $message",
+            message.contains("Check for latest version"),
+        )
+    }
+
+    @Test
+    fun `a no-storage rejection says to free up space`() {
+        for (code in listOf("INSTALL_FAILED_NO_STORAGE", "INSTALL_FAILED_INSUFFICIENT_STORAGE")) {
+            val message = installFailureMessage(code)
+            assertTrue("free-up-space remedy missing for $code, got: $message", message.contains("storage"))
+            assertTrue("retry path missing for $code, got: $message", message.contains("Check for latest version"))
+        }
+    }
+
+    @Test
+    fun `a damaged-or-unsigned apk rejection says to re-download`() {
+        for (code in listOf("INSTALL_PARSE_FAILED_NO_CERTIFICATES", "INSTALL_PARSE_FAILED_NO_CERT")) {
+            val message = installFailureMessage(code)
+            assertTrue("re-download remedy missing for $code, got: $message", message.contains("Update to latest"))
+        }
+    }
+
+    @Test
+    fun `an unknown failure still surfaces the rejection and the code`() {
+        val message = installFailureMessage("INSTALL_FAILED_SOMETHING_NEW")
+        assertTrue("the rejection must be said, got: $message", message.contains("rejected"))
+        assertTrue("the code must be carried, got: $message", message.contains("INSTALL_FAILED_SOMETHING_NEW"))
+        assertTrue("a retry must be offered, got: $message", message.contains("Check for latest version"))
+    }
+
+    @Test
+    fun `a failure with no code still surfaces the rejection`() {
+        val message = installFailureMessage(null)
+        assertTrue("the rejection must be said, got: $message", message.contains("rejected"))
+        assertTrue("a retry must be offered, got: $message", message.contains("Check for latest version"))
+    }
+
+    @Test
+    fun `blank failure codes read as missing`() {
+        assertEquals(installFailureMessage(null), installFailureMessage("  "))
+    }
+
     /**
      * A fixture mimicking the public GitHub `/releases/latest` response
      * (the shape the API returns): the `tag_name`, the many metadata

@@ -1,8 +1,11 @@
 package com.polex.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -21,8 +24,30 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
 
+    /**
+     * The platform installer's result route (the settings "Update" area's
+     * ActivityResult launcher, registered before any launch): a rejected
+     * install (e.g. INSTALL_FAILED_UPDATE_INCOMPATIBLE) reaches
+     * [UpdateManager.onInstallResult] through it instead of being
+     * swallowed. The install-settings jump itself is fire-and-forget (a
+     * plain startActivity), so every result on this launcher is the
+     * installer's.
+     */
+    private lateinit var installResult: ActivityResultLauncher<Intent>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        installResult = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult(),
+        ) { Updates.manager(this).onInstallResult(it) }
+        // The engine's installer launch route: every installer launch (the
+        // pane's Install tap, the settings-return auto-install) goes
+        // through this ActivityResult launcher, so the installer's RESULT
+        // is always captured (a rejected install surfaces through the
+        // engine's onInstallResult instead of being swallowed).
+        Updates.manager(this).installLaunchRoute = { intent ->
+            installResult.launch(intent)
+        }
 
         // Keep the widget fresh. WorkManager's minimum periodic interval is
         // 15 minutes; the widget also refreshes on every in-app status poll
@@ -59,7 +84,10 @@ class MainActivity : ComponentActivity() {
         // be off): the engine re-checks and launches the kept install or
         // offers the retry path. A no-op on every other resume (the
         // engine's own flag only arms after it sent the user to the
-        // settings screen).
+        // settings screen). The auto-install launches through the engine's
+        // registered ActivityResult route (set in onCreate), so a rejected
+        // install surfaces (the engine's onInstallResult) instead of
+        // idling at "Ready to install".
         Updates.manager(this).onActivityResumed(this)
     }
 }

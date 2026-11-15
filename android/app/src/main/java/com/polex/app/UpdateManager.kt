@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.result.ActivityResult
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +20,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
+
+/**
+ * The installer result's failure extra — the platform's `Intent
+ * EXTRA_FAILED_REQUEST` (API 26+), the string the platform installer puts
+ * on a rejected install's result data (e.g. `INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+ * The pruned compile stub omits that `Intent` constant, so the literal
+ * value the platform uses (same treatment as the settings-action literals
+ * in [INSTALL_SETTINGS_ACTION_MODERN] / [INSTALL_SETTINGS_ACTION_LEGACY]).
+ */
+const val INSTALLER_FAILED_REQUEST_EXTRA = "android.content.pm.extra.INSTALL_FAILED_REQUEST"
 
 /**
  * Process-wide holder for the settings "Update" area's [UpdateManager].
@@ -58,8 +69,9 @@ object Updates {
  * parse are the pure domain in UpdateCheck.kt ([parseLatestRelease],
  * [releaseVersion], [releaseIsNewer], [pickApkAsset]); this class is the
  * Android-aware plumbing around them (the OkHttp fetch + streamed download,
- * the [FileProvider] uri, the install intent, and the
- * `REQUEST_INSTALL_PACKAGES` gate).
+ * the [FileProvider] uri, the install intent, the `REQUEST_INSTALL_PACKAGES`
+ * gate, and the installer's result — a rejected install settles to the
+ * plain error copy, see [onInstallResult]).
  */
 class UpdateManager(
     private val context: Context,
@@ -95,6 +107,25 @@ class UpdateManager(
      */
     @Volatile
     private var awaitingPermission = false
+
+    /**
+     * The installer's launch route: the hosting activity registers the
+     * ActivityResult launcher (MainActivity.onCreate) and hands this engine
+     * its launch function, so the installer's RESULT reaches
+     * [onInstallResult] (a rejected install surfaces as the error copy
+     * instead of being swallowed). Every installer launch in the engine
+     * (the pane's Install tap, the settings-return auto-install) goes
+     * through it. When the activity never registered a route (never the
+     * case in the production app — MainActivity always does), the engine
+     * falls back to a fire-and-forget `startActivity`.
+     */
+    @Volatile
+    var installLaunchRoute: ((Intent) -> Unit)? = null
+
+    /** The engine's installer launch: the registered route, or fire-and-forget. */
+    private fun launchInstaller(activity: Activity, intent: Intent) {
+        installLaunchRoute?.invoke(intent) ?: activity.startActivity(intent)
+    }
 
     // ---- the check ----
 
@@ -162,10 +193,13 @@ class UpdateManager(
     /**
      * The user tapped the install action while [UpdateState.ReadyToInstall]:
      * when the phone's "install unknown apps" permission is granted, launch
-     * the platform installer over the APK's [FileProvider] uri; when it is
+     * the platform installer over the APK's [FileProvider] uri — through
+     * the activity's registered ActivityResult route ([installLaunchRoute],
+     * so a rejected install surfaces, see [onInstallResult]); when it is
      * not, explain the requirement in a plain message and open the phone's
-     * own install-settings screen (the download is kept and
-     * [onActivityResumed] offers the retry path on the return).
+     * own install-settings screen (the action that actually resolves on
+     * this device, see [pickInstallSettingsAction]; the download is kept
+     * and [onActivityResumed] offers the retry path on the return).
      */
     fun requestInstall(activity: Activity) {
         val ready = _state.value as? UpdateState.ReadyToInstall ?: return
@@ -175,14 +209,25 @@ class UpdateManager(
             return
         }
         if (canInstallPackages()) {
-            activity.startActivity(installIntent(uri))
+            launchInstaller(activity, installIntent(uri))
         } else {
             awaitingPermission = true
-            toast(
-                "Android requires the \"install unknown apps\" permission for this app. " +
-                    "Allow it in the phone's settings, then come back and tap Install again.",
-            )
-            runCatching { activity.startActivity(manageInstallSettingsIntent()) }
+            val action = installSettingsAction()
+            if (action == null) {
+                // Neither settings action resolves on this device: the
+                // permission can only be granted by hand.
+                toast(
+                    "Android requires the \"install unknown apps\" permission for this app. " +
+                        "Find \"Install unknown apps\" in the phone's settings, allow it for " +
+                        "PoleX, then come back and tap Install again.",
+                )
+            } else {
+                toast(
+                    "Android requires the \"install unknown apps\" permission for this app. " +
+                        "Allow it in the phone's settings, then come back and tap Install again.",
+                )
+                runCatching { activity.startActivity(manageInstallSettingsIntent(action)) }
+            }
         }
     }
 
@@ -190,20 +235,62 @@ class UpdateManager(
      * Called from the activity's onResume (the return from the install
      * settings, or any resume). Only acts when [requestInstall] sent the
      * user to the settings screen: if the permission is now granted the
-     * install is launched automatically (the kept APK), otherwise the
-     * download is kept and the retry path (the Install button) is offered.
+     * install is launched automatically (the kept APK) — through the
+     * same ActivityResult route [requestInstall] uses, so a rejected
+     * install surfaces there too — otherwise the download is kept and the
+     * retry path (the Install button) is offered.
      */
     fun onActivityResumed(activity: Activity) {
         if (!awaitingPermission) return
         awaitingPermission = false
         val ready = _state.value as? UpdateState.ReadyToInstall ?: return
         if (canInstallPackages()) {
-            installUri(ready.apkPath)?.let { activity.startActivity(installIntent(it)) }
+            installUri(ready.apkPath)?.let { launchInstaller(activity, installIntent(it)) }
         } else {
             toast(
                 "The \"install unknown apps\" permission is still off. " +
                     "The download is kept - tap Install to try again.",
             )
+        }
+    }
+
+    /**
+     * The platform installer's RESULT (delivered by the ActivityResult
+     * launcher the activity registered as [installLaunchRoute]): a success settles the
+     * area to [UpdateState.Installed] (the APK is in; restarting the app
+     * runs it). A platform rejection carries its failure code in the
+     * result data ([INSTALLER_FAILED_REQUEST_EXTRA] — e.g.
+     * `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; the platform delivers a
+     * rejected install with a CANCELED-style result), and settles the
+     * area to [UpdateState.Error] with the concrete failure and the
+     * remedy, via [installFailureMessage], instead of idling at "Ready to
+     * install". The user's own dismissal of the installer (back) carries
+     * no failure code: the area stays at [UpdateState.ReadyToInstall] —
+     * not a failure, the Install button is the retry. Any other non-OK
+     * result still surfaces that the install was rejected (never idles
+     * silently).
+     */
+    fun onInstallResult(result: ActivityResult) {
+        val ready = _state.value as? UpdateState.ReadyToInstall ?: return
+        if (result.resultCode == Activity.RESULT_OK) {
+            _state.value = UpdateState.Installed(ready.latestVersion)
+            return
+        }
+        // A non-OK result: the failure extra is the discriminator — the
+        // platform sets it on a rejection (even when the result code is a
+        // plain CANCELED), and only the user's own dismissal carries none.
+        val failure = result.data?.getStringExtra(INSTALLER_FAILED_REQUEST_EXTRA)
+        when {
+            failure != null && failure.isNotBlank() -> {
+                _state.value = UpdateState.Error(installFailureMessage(failure))
+            }
+            result.resultCode == Activity.RESULT_CANCELED -> {
+                // The user dismissed the installer: stay ReadyToInstall.
+            }
+            else -> {
+                // Rejected, but no readable failure code: still surface it.
+                _state.value = UpdateState.Error(installFailureMessage(null))
+            }
         }
     }
 
@@ -228,12 +315,28 @@ class UpdateManager(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-    /** The phone's own "install unknown apps" screen for this app (API 26+).
-     *  The action is `android.provider.Settings.ACTION_MANAGE_APP_INSTALL_SETTINGS`
-     *  — the pruned compile stub omits that `Settings` constant, so the
-     *  literal value the platform uses. */
-    private fun manageInstallSettingsIntent(): Intent =
-        Intent(ACTION_MANAGE_APP_INSTALL_SETTINGS).apply {
+    /**
+     * The "install unknown apps" settings action that actually opens on
+     * this device: the modern per-app action when it resolves, the legacy
+     * one when it does not (it has no target activity on some newer builds
+     * — e.g. the Pixel 7 Pro round), `null` when neither resolves (the
+     * caller explains the requirement in a plain message instead).
+     */
+    private fun installSettingsAction(): String? =
+        pickInstallSettingsAction(
+            actionResolves(INSTALL_SETTINGS_ACTION_MODERN),
+            actionResolves(INSTALL_SETTINGS_ACTION_LEGACY),
+        )
+
+    /** The resolver check: at least one target activity for [action]. */
+    private fun actionResolves(action: String): Boolean =
+        runCatching {
+            context.packageManager.queryIntentActivities(Intent(action), 0).isNotEmpty()
+        }.getOrDefault(false)
+
+    /** The phone's own "install unknown apps" screen for this app (API 26+). */
+    private fun manageInstallSettingsIntent(action: String): Intent =
+        Intent(action).apply {
             data = Uri.parse("package:" + context.packageName)
         }
 
@@ -341,13 +444,5 @@ class UpdateManager(
         /** The download's stream-buffer size (64 KiB). */
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
 
-        /**
-         * The "install unknown apps" settings action
-         * (`android.provider.Settings.ACTION_MANAGE_APP_INSTALL_SETTINGS`,
-         * API 26+). The pruned compile stub omits that `Settings` constant,
-         * so the literal value the platform uses.
-         */
-        const val ACTION_MANAGE_APP_INSTALL_SETTINGS =
-            "android.settings.MANAGE_APP_INSTALL_SETTINGS"
     }
 }
